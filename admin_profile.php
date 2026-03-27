@@ -100,9 +100,9 @@ $success = isset($_GET['success']) ? 'Profile updated successfully!' : '';
             <span class="nav-item-label">AI Control</span>
         </a>
         <div class="nav-label">System</div>
-        <a href="admin_dashboard.php#section-logs" class="nav-item">
-            <span class="nav-icon">📋</span>
-            <span class="nav-item-label">System Logs</span>
+        <a href="admin_settings.php" class="nav-item">
+            <span class="nav-icon">⚙️</span>
+            <span class="nav-item-label">System Settings</span>
         </a>
         <a href="admin_profile.php" class="nav-item active">
             <span class="nav-icon">👤</span>

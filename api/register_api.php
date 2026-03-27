@@ -2,35 +2,69 @@
 session_start();
 require_once __DIR__ . '/db.php';
 
+// Detect if JSON request (from Android/Mobile)
+$input = json_decode(file_get_contents('php://input'), true);
+$isJson = ($input !== null);
+
 // Only handle POST
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: ../register.php');
+    if ($isJson) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid request method']);
+    } else {
+        header('Location: ../register.php');
+    }
     exit;
 }
 
-$name     = trim($_POST['name'] ?? '');
-$email    = trim($_POST['email'] ?? '');
-$password = $_POST['password'] ?? '';
-$confirm  = $_POST['confirm_password'] ?? '';
-$role     = $_POST['role'] ?? 'Student';
+$name     = trim($isJson ? ($input['name'] ?? $input['fullname'] ?? '') : ($_POST['name'] ?? ''));
+$email    = trim($isJson ? ($input['email'] ?? '') : ($_POST['email'] ?? ''));
+$password = $isJson ? ($input['password'] ?? '') : ($_POST['password'] ?? '');
+$confirm  = $isJson ? ($input['confirm_password'] ?? $input['password'] ?? '') : ($_POST['confirm_password'] ?? '');
+$role     = trim($isJson ? ($input['role'] ?? 'Student') : ($_POST['role'] ?? 'Student'));
 
 // Basic validation
-if (empty($name) || empty($email) || empty($password) || empty($confirm)) {
-    header('Location: ../register.php?error=empty');
+if (empty($name) || empty($email) || empty($password)) {
+    if ($isJson) {
+        echo json_encode(['status' => 'error', 'message' => 'Missing required fields']);
+    } else {
+        $_SESSION['reg_form'] = $_POST;
+        header('Location: ../register.php?error=empty');
+    }
     exit;
 }
 
 if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-    header('Location: ../register.php?error=email');
+    if ($isJson) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid email format']);
+    } else {
+        $_SESSION['reg_form'] = $_POST;
+        header('Location: ../register.php?error=email');
+    }
+    exit;
+}
+
+if (substr(strtolower($email), -10) !== '@gmail.com') {
+    if ($isJson) {
+        echo json_encode(['status' => 'error', 'message' => 'Email must be in the format: name@gmail.com']);
+    } else {
+        $_SESSION['reg_form'] = $_POST;
+        header('Location: ../register.php?error=format');
+    }
     exit;
 }
 
 if (strlen($password) < 6) {
-    header('Location: ../register.php?error=short');
+    if ($isJson) {
+        echo json_encode(['status' => 'error', 'message' => 'Password too short']);
+    } else {
+        $_SESSION['reg_form'] = $_POST;
+        header('Location: ../register.php?error=short');
+    }
     exit;
 }
 
-if ($password !== $confirm) {
+if (!$isJson && $password !== $confirm) {
+    $_SESSION['reg_form'] = $_POST;
     header('Location: ../register.php?error=match');
     exit;
 }
@@ -44,15 +78,34 @@ $stmt->execute();
 $stmt->store_result();
 
 if ($stmt->num_rows > 0) {
+    if ($isJson) {
+        echo json_encode(['status' => 'error', 'message' => 'Email already exists']);
+    } else {
+        $_SESSION['reg_form'] = $_POST;
+        header('Location: ../register.php?error=exists');
+    }
     $stmt->close();
-    header('Location: ../register.php?error=exists');
+    $conn->close();
     exit;
 }
 $stmt->close();
 
 // Insert user
-$allowed = ['Student','Researcher','Educator'];
-if (!in_array($role, $allowed)) $role = 'Student';
+// Handle roles from both Web and Admin/Android
+$allowed_web = ['Student','Researcher','Educator'];
+$allowed_app = [
+    'Biomedical Engineering Student',
+    'Medical Student',
+    'Neuroscience Researcher',
+    'Neurology Resident',
+    'Clinical Engineer',
+    'Healthcare Professional',
+    'Others',
+    'Admin'
+];
+$all_allowed = array_merge($allowed_web, $allowed_app);
+
+if (!in_array($role, $all_allowed)) $role = 'Student';
 
 $hashed = password_hash($password, PASSWORD_BCRYPT);
 $status = 'Active';
@@ -63,10 +116,18 @@ $stmt->bind_param('sssss', $name, $email, $hashed, $role, $status);
 if ($stmt->execute()) {
     $stmt->close();
     $conn->close();
-    header('Location: ../index.php?registered=1');
+    if ($isJson) {
+        echo json_encode(['status' => 'success', 'message' => 'Account created successfully']);
+    } else {
+        header('Location: ../index.php?registered=1');
+    }
 } else {
     $stmt->close();
     $conn->close();
-    header('Location: ../register.php?error=fail');
+    if ($isJson) {
+        echo json_encode(['status' => 'error', 'message' => 'Failed to create account']);
+    } else {
+        header('Location: ../register.php?error=fail');
+    }
 }
 exit;

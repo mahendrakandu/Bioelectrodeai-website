@@ -2,16 +2,28 @@
 session_start();
 require_once __DIR__ . '/db.php';
 
+// Detect if JSON request (from Android/Mobile)
+$input = json_decode(file_get_contents('php://input'), true);
+$isJson = ($input !== null);
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: ../index.php');
+    if ($isJson) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid request method']);
+    } else {
+        header('Location: ../index.php');
+    }
     exit;
 }
 
-$email    = trim($_POST['email'] ?? '');
-$password = $_POST['password'] ?? '';
+$email    = trim($isJson ? ($input['email'] ?? '') : ($_POST['email'] ?? ''));
+$password = $isJson ? ($input['password'] ?? '') : ($_POST['password'] ?? '');
 
 if (empty($email) || empty($password)) {
-    header('Location: ../index.php?error=empty');
+    if ($isJson) {
+        echo json_encode(['status' => 'error', 'message' => 'Empty email or password']);
+    } else {
+        header('Location: ../index.php?error=empty');
+    }
     exit;
 }
 
@@ -22,7 +34,11 @@ $stmt->execute();
 $result = $stmt->get_result();
 
 if ($result->num_rows === 0) {
-    header('Location: ../index.php?error=invalid');
+    if ($isJson) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid email or password']);
+    } else {
+        header('Location: ../index.php?error=invalid&email=' . urlencode($email));
+    }
     $stmt->close();
     $conn->close();
     exit;
@@ -31,14 +47,22 @@ if ($result->num_rows === 0) {
 $user = $result->fetch_assoc();
 
 if ($user['status'] === 'Blocked') {
-    header('Location: ../index.php?error=blocked');
+    if ($isJson) {
+        echo json_encode(['status' => 'error', 'message' => 'Your account is blocked']);
+    } else {
+        header('Location: ../index.php?error=blocked&email=' . urlencode($email));
+    }
     $stmt->close();
     $conn->close();
     exit;
 }
 
 if (!password_verify($password, $user['password'])) {
-    header('Location: ../index.php?error=invalid');
+    if ($isJson) {
+        echo json_encode(['status' => 'error', 'message' => 'Invalid email or password']);
+    } else {
+        header('Location: ../index.php?error=invalid&email=' . urlencode($email));
+    }
     $stmt->close();
     $conn->close();
     exit;
@@ -50,7 +74,7 @@ $update->bind_param('i', $user['id']);
 $update->execute();
 $update->close();
 
-// Set session
+// Set session for website
 $_SESSION['user_id']   = $user['id'];
 $_SESSION['user_name'] = $user['name'];
 $_SESSION['user_email']= $user['email'];
@@ -59,10 +83,24 @@ $_SESSION['user_role'] = $user['role'];
 $stmt->close();
 $conn->close();
 
-// Role-based redirect
-if ($user['role'] === 'Admin') {
-    header('Location: ../admin_dashboard.php');
+if ($isJson) {
+    // Return JSON for Android
+    echo json_encode([
+        'status' => 'success',
+        'message' => 'Login successful',
+        'user' => [
+            'id' => (int)$user['id'],
+            'name' => $user['name'],
+            'email' => $user['email'],
+            'role' => $user['role']
+        ]
+    ]);
 } else {
-    header('Location: ../dashboard.php');
+    // Role-based redirect for Website
+    if ($user['role'] === 'Admin') {
+        header('Location: ../admin_dashboard.php');
+    } else {
+        header('Location: ../dashboard.php');
+    }
 }
 exit;

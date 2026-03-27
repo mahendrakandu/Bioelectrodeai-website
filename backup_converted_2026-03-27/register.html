@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Register – BioElectrode AI</title>
+    <meta name="description" content="Create your BioElectrode AI account to access signal analysis, AI insights, and learning modules.">
+    <link rel="stylesheet" href="css/style.css">
+    <script>
+        if (localStorage.getItem('set_tog_tog-dark') === '0') {
+            document.documentElement.classList.add('light-mode');
+        }
+    </script>
+</head>
+<body>
+<div class="auth-container">
+
+    <!-- Left Panel -->
+    <div class="auth-left">
+        <div class="auth-brand fade-up">
+            <div class="logo-icon">
+                <!-- Lucide: Rocket -->
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke="#fff"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5-4 5-4"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 4-5 4-5"/></svg>
+            </div>
+            <h1>Join the Platform</h1>
+            <p>Start your journey with advanced bioelectrode signal analysis and AI-powered learning.</p>
+        </div>
+        <div class="auth-feature-list">
+            <style>
+                .feature-item-compact { padding: 8px 12px; margin-bottom: 8px; }
+                .feature-text-compact { display: flex; flex-direction: column; line-height: 1.2; }
+                .feature-text-compact strong { font-size: 0.85rem; color: rgba(255,255,255,0.95); }
+                .feature-text-compact small { font-size: 0.7rem; color: rgba(255,255,255,0.7); margin-top: 2px; }
+                .feature-icon-compact { width: 32px; height: 32px; font-size: 1.1rem; }
+                .feature-icon-compact svg { width: 16px; height: 16px; }
+            </style>
+            <div class="feature-item feature-item-compact fade-up delay-1">
+                <span class="feature-icon feature-icon-compact">📡</span>
+                <span class="feature-text feature-text-compact">
+                    <strong>Multi-Signal Support</strong>
+                    <small>ECG, EEG, and EMG signals.</small>
+                </span>
+            </div>
+            <div class="feature-item feature-item-compact fade-up delay-2">
+                <span class="feature-icon feature-icon-compact">⚡</span>
+                <span class="feature-text feature-text-compact">
+                    <strong>Dual Recording</strong>
+                    <small>Bipolar & Monopolar configs.</small>
+                </span>
+            </div>
+            <div class="feature-item feature-item-compact fade-up delay-3">
+                <span class="feature-icon feature-icon-compact">📈</span>
+                <span class="feature-text feature-text-compact">
+                    <strong>Real-Time Acquisition</strong>
+                    <small>Live waveform graphs.</small>
+                </span>
+            </div>
+            <div class="feature-item feature-item-compact fade-up delay-4">
+                <span class="feature-icon feature-icon-compact">🧠</span>
+                <span class="feature-text feature-text-compact">
+                    <strong>AI Signal Analysis</strong>
+                    <small>Filtering & feature extraction.</small>
+                </span>
+            </div>
+            <div class="feature-item feature-item-compact fade-up delay-5">
+                <span class="feature-icon feature-icon-compact">🎯</span>
+                <span class="feature-text feature-text-compact">
+                    <strong>Electrode Guidance</strong>
+                    <small>Visual placement instructions.</small>
+                </span>
+            </div>
+            <div class="feature-item feature-item-compact fade-up delay-6">
+                <span class="feature-icon feature-icon-compact">🔍</span>
+                <span class="feature-text feature-text-compact">
+                    <strong>Quality Assessment</strong>
+                    <small>Noise & artifact detection.</small>
+                </span>
+            </div>
+            <div class="feature-item feature-item-compact fade-up delay-7">
+                <span class="feature-icon feature-icon-compact">📊</span>
+                <span class="feature-text feature-text-compact">
+                    <strong>Comparative Dashboard</strong>
+                    <small>Side-by-side waveform comparisons.</small>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Panel: Registration Form -->
+    <div class="auth-right">
+        <div class="auth-form-container fade-up">
+            <h2>Create Account
+                <!-- Lucide: Sparkles -->
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="width:28px;height:28px;stroke:var(--blue-l);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>
+            </h2>
+            <p class="subtitle">Fill in your details to get started</p>
+
+            <div class="alert alert-error" style="display:none;" id="errorAlert">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="width:18px;height:18px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                <span id="errorMessage"></span>
+            </div>
+
+            <form method="POST" action="api/register_api.php" id="registerForm">
+                <div class="form-group">
+                    <label for="name">Full Name</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">
+                            <!-- Lucide: User -->
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                        </span>
+                        <input type="text" id="name" name="name" class="form-control"
+                               placeholder="Dr. John Doe" required autocomplete="name"
+                               title="Alphabetic characters only">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="email">Email Address</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">
+                            <!-- Lucide: Mail -->
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+                        </span>
+                        <input type="email" id="email" name="email" class="form-control"
+                               placeholder="username@gmail.com" required autocomplete="email">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="role">Your Role</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">
+                            <!-- Lucide: Tag -->
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></svg>
+                        </span>
+                        <select id="role" name="role" class="form-control" style="padding-left:44px;">
+                            <option value="Student">🎓 Student</option>
+                            <option value="Researcher">🔬 Researcher</option>
+                            <option value="Educator">🏫 Educator</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Password</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">
+                            <!-- Lucide: Lock -->
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        </span>
+                        <input type="password" id="password" name="password" class="form-control"
+                               placeholder="Min. 6 characters" required>
+                        <button type="button" class="toggle-pass" id="togglePass">
+                            <!-- Lucide: Eye -->
+                            <svg id="eyeIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="confirm_password">Confirm Password</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">
+                            <!-- Lucide: Key -->
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
+                        </span>
+                        <input type="password" id="confirm_password" name="confirm_password" class="form-control"
+                               placeholder="Re-enter password" required>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary" id="registerBtn" data-loading-text="Creating Account...">
+                    <span>Create Account</span>
+                    <!-- Lucide: ArrowRight -->
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                </button>
+            </form>
+
+            <div class="divider"><span>OR</span></div>
+            <div class="auth-link">
+                Already have an account? <a href="index.html">Sign in</a>
+            </div>
+        </div>
+    </div>
+
+</div>
+<script src="js/script.js"></script>
+</body>
+</html>

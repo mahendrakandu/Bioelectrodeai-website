@@ -72,6 +72,39 @@ CREATE TABLE IF NOT EXISTS `learning_content` (
     UNIQUE KEY (`page_slug`, `section_id`)
 );
 
+-- User progress table
+CREATE TABLE IF NOT EXISTS `user_progress` (
+    `id`                    INT AUTO_INCREMENT PRIMARY KEY,
+    `user_id`               INT NOT NULL,
+    `module_name`           VARCHAR(100) NOT NULL,
+    `completion_percentage` INT DEFAULT 0,
+    `last_updated`          TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    UNIQUE KEY (`user_id`, `module_name`)
+);
+
+-- AI Analysis History table
+CREATE TABLE IF NOT EXISTS `analysis_history` (
+    `id`          INT AUTO_INCREMENT PRIMARY KEY,
+    `user_id`     INT NOT NULL,
+    `signal_type` VARCHAR(50) NOT NULL,
+    `technique`   VARCHAR(50) NOT NULL,
+    `results_json` JSON NOT NULL,
+    `created_at`  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+);
+
+-- Quiz Results table
+CREATE TABLE IF NOT EXISTS `quiz_results` (
+    `id`              INT AUTO_INCREMENT PRIMARY KEY,
+    `user_id`         INT NOT NULL,
+    `quiz_type`       VARCHAR(100) NOT NULL,
+    `score`           INT NOT NULL,
+    `total_questions` INT NOT NULL,
+    `completed_at`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+);
+
 -- Default Admin user (password: 'password')
 INSERT INTO `users` (`name`, `email`, `password`, `role`, `status`)
 VALUES ('Super Admin', 'admin@bioelectrode.com',

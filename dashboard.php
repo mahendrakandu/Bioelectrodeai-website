@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 session_start();
 if (!isset($_SESSION['user_id'])) { header('Location: index.php'); exit; }
 if ($_SESSION['user_role'] === 'Admin') { header('Location: admin_dashboard.php'); exit; }
@@ -34,7 +34,7 @@ $modules = [
     'bipolar_recording' => ['icon'=>'🧬','title'=>'Bipolar Recording', 'desc'=>'Differential signal analysis', 'next'=>'monopolar_recording'],
     'monopolar_recording' => ['icon'=>'📡','title'=>'Monopolar Recording', 'desc'=>'Absolute potential analysis', 'next'=>'quiz'],
     'quiz'      => ['icon'=>'❓','title'=>'Take Quiz',         'desc'=>'Test your knowledge'],
-    'clinical'  => ['icon'=>'🏥','title'=>'Clinical Cases',   'desc'=>'Real-world examples'],
+    'educational'  => ['icon'=>'🏥','title'=>'Practice Scenarios',   'desc'=>'Real-world examples'],
     'report'    => ['icon'=>'📄','title'=>'Comparison Report','desc'=>'Side-by-side analysis'],
     'resources' => ['icon'=>'📁','title'=>'Resources Library','desc'=>'Study materials'],
     'glossary'  => ['icon'=>'📖','title'=>'Glossary',         'desc'=>'Browse definitions for bioelectrode terminology.'],
@@ -44,7 +44,69 @@ $modules = [
 ];
 $m = $modules[$page] ?? null;
 
-$m = $modules[$page] ?? null;
+// ═══ Real-Time Learning Progress Tracking ═══
+if (isset($_SESSION['user_id']) && $m) {
+    require_once __DIR__ . '/api/db.php';
+    $_sdb = getDB();
+    $uid = $_SESSION['user_id'];
+    
+    // Modules that count towards learning progress
+    $trackableModules = [
+        'ecg', 'eeg', 'emg', 'electrode_placement', 'recording_techniques', 
+        'compare', 'pros_cons', 'decision_guide', 'signal_quality', 
+        'bipolar_recording', 'monopolar_recording'
+    ];
+    
+    if (in_array($page, $trackableModules)) {
+        // Mark current page as in-progress (50%)
+        $checkP = $_sdb->prepare("SELECT id FROM user_progress WHERE user_id=? AND module_name=?");
+        $checkP->bind_param('is', $uid, $page);
+        $checkP->execute();
+        if ($checkP->get_result()->num_rows === 0) {
+            $insP = $_sdb->prepare("INSERT INTO user_progress (user_id, module_name, completion_percentage) VALUES (?,?,50)");
+            $insP->bind_param('is', $uid, $page);
+            $insP->execute(); $insP->close();
+        }
+        $checkP->close();
+        
+        // Mark previous module as 100% complete
+        $idx = array_search($page, $trackableModules);
+        if ($idx > 0) {
+            $prev = $trackableModules[$idx - 1];
+            $updP = $_sdb->prepare("UPDATE user_progress SET completion_percentage=100 WHERE user_id=? AND module_name=?");
+            $updP->bind_param('is', $uid, $prev);
+            $updP->execute(); $updP->close();
+        }
+    } elseif ($page === 'quiz') {
+        // Reaching quiz marks the last module as complete
+        $lastM = end($trackableModules);
+        $updP = $_sdb->prepare("UPDATE user_progress SET completion_percentage=100 WHERE user_id=? AND module_name=?");
+        $updP->bind_param('is', $uid, $lastM);
+        $updP->execute(); $updP->close();
+    }
+}
+
+// Fetch latest platform updates for home page
+$platformUpdates = [];
+$dynContent = [];
+if ($page === 'home' || $page === 'settings' || in_array($page, ['ecg', 'eeg', 'emg', 'electrode_placement'])) {
+    if (!isset($_sdb)) { require_once __DIR__ . '/api/db.php'; $_sdb = getDB(); }
+    
+    if ($page === 'home' || $page === 'settings') {
+        $updRes = $_sdb->query("SELECT title, description, type, added_date FROM app_items ORDER BY added_date DESC LIMIT 3");
+        if ($updRes) while ($row = $updRes->fetch_assoc()) $platformUpdates[] = $row;
+    }
+
+    // Fetch dynamic learning content
+    $cRes = $_sdb->prepare("SELECT section_id, title, content FROM learning_content WHERE page_slug = ?");
+    $cRes->bind_param("s", $page);
+    $cRes->execute();
+    $cResult = $cRes->get_result();
+    while ($row = $cResult->fetch_assoc()) {
+        $dynContent[$row['section_id']] = $row;
+    }
+    $cRes->close();
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -61,7 +123,7 @@ $m = $modules[$page] ?? null;
         }
     </script>
     <script src="quiz_data.js"></script>
-    <script src="clinical_data.js"></script>
+    <script src="scenario_data.js"></script>
     <script src="resource_data.js"></script>
     <style>
         /* Shared Modal System */
@@ -90,25 +152,50 @@ $m = $modules[$page] ?? null;
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
         @keyframes fadeUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
         .fade-up { animation: fadeUp 0.5s ease forwards; }
+
+        /* Interactive Expansion System */
+        .expand-card { cursor: pointer; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); position: relative; }
+        .expand-card:hover { transform: translateY(-2px); background: rgba(255,255,255,0.04) !important; box-shadow: 0 10px 20px rgba(0,0,0,0.2); }
+        .expand-detail { 
+            max-height: 0; 
+            overflow: hidden; 
+            transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease; 
+            opacity: 0;
+            background: rgba(0,0,0,0.2);
+            border-radius: 12px;
+            margin-top: 0;
+        }
+        .expand-card.active .expand-detail { 
+            max-height: 500px; 
+            opacity: 1; 
+            margin-top: 12px;
+            padding: 15px;
+            border: 1px dashed rgba(255,255,255,0.1);
+        }
+        .expand-icon { transition: transform 0.3s ease; display: inline-block; }
+        .expand-card.active .expand-icon { transform: rotate(180deg); }
     </style>
 </head>
 <body class="dashboard-body">
 <div id="particles"></div>
 
 <!-- ═══ SIDEBAR ═══ -->
-<aside class="sidebar" id="sidebar">
+<aside class="sidebar glass" id="sidebar">
     <div class="sidebar-brand">
-        <div class="brand-icon"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-zap"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
+        <div class="brand-bg-glow"></div>
+        <div class="brand-icon glow-blue">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-zap"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        </div>
         <div class="brand-text">
             <div class="brand-name">BioElectrode AI</div>
-            <div class="brand-tagline">Signal Analysis Platform</div>
+            <div class="brand-tagline">Advanced Analysis</div>
         </div>
     </div>
 
-    <a href="dashboard.php?page=profile" class="sidebar-user" style="text-decoration:none; cursor:pointer;">
-        <div class="user-avatar" style="overflow:hidden;">
+    <a href="dashboard.php?page=profile" class="sidebar-user glass-card" style="margin: 20px; text-decoration:none;">
+        <div class="user-avatar glow-purple">
             <?php if (!empty($_SESSION['profile_image']) && file_exists($_SESSION['profile_image'])): ?>
-                <img src="<?= htmlspecialchars($_SESSION['profile_image']) ?>" alt="Profile" style="width:100%;height:100%;object-fit:cover;">
+                <img src="<?= htmlspecialchars($_SESSION['profile_image']) ?>" alt="Profile">
             <?php else: ?>
                 <?= $userInitial ?>
             <?php endif; ?>
@@ -122,199 +209,159 @@ $m = $modules[$page] ?? null;
     </a>
 
     <nav class="sidebar-nav">
-        <div class="nav-label">Main Menu</div>
+        <!-- Dashboard Sections -->
+        <div class="nav-label">Workspace</div>
         <a href="dashboard.php" class="nav-item <?= $page==='home'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-home"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></span>
+            <span class="nav-icon">🏠</span>
             <span class="nav-item-label">Home</span>
         </a>
-        <a href="dashboard.php?page=learn" class="nav-item <?= $page==='learn'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-book"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg></span>
-            <span class="nav-item-label">Learn</span>
-        </a>
-        <a href="dashboard.php?page=compare" class="nav-item <?= $page==='compare'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-zap"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
-            <span class="nav-item-label">Compare</span>
-        </a>
-        <a href="dashboard.php?page=simulator" class="nav-item <?= $page==='simulator'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-monitor"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg></span>
-            <span class="nav-item-label">Simulator</span>
-        </a>
         <a href="dashboard.php?page=ai" class="nav-item <?= $page==='ai'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-brain"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.54Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.54Z"/></svg></span>
+            <span class="nav-icon">🧠</span>
             <span class="nav-item-label">AI Analysis</span>
+            <span class="nav-badge glow-purple">PRO</span>
         </a>
         <a href="dashboard.php?page=visualize" class="nav-item <?= $page==='visualize'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bar-chart-3"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg></span>
-            <span class="nav-item-label">Visualizations</span>
-        </a>
-        <a href="dashboard.php?page=signal_quality" class="nav-item <?= $page==='signal_quality'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-radio"><path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/><path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5"/><path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1"/></svg></span>
-            <span class="nav-item-label">Signal Quality</span>
+            <span class="nav-icon">📊</span>
+            <span class="nav-item-label">Analytics</span>
         </a>
 
-        <div class="nav-label">Biomedical Signals</div>
+        <div class="nav-label">Intelligence</div>
         <a href="dashboard.php?page=ecg" class="nav-item <?= $page==='ecg'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-heart-pulse"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/><path d="M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27"/></svg></span>
-            <span class="nav-item-label">ECG</span>
+            <span class="nav-icon">❤️</span>
+            <span class="nav-item-label">ECG Engine</span>
         </a>
         <a href="dashboard.php?page=eeg" class="nav-item <?= $page==='eeg'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-activity"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span>
-            <span class="nav-item-label">EEG</span>
+            <span class="nav-icon">🧠</span>
+            <span class="nav-item-label">EEG Engine</span>
         </a>
         <a href="dashboard.php?page=emg" class="nav-item <?= $page==='emg'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-dumbbell"><path d="M14.4 14.4 9.6 9.6"/><path d="M18.657 21.485a2 2 0 1 1-2.829-2.828l-1.767 1.767-2.828-2.828 1.767-1.767a2 2 0 1 1-2.828-2.829l1.767-1.767L9.11 8.405l-1.767 1.767a2 2 0 1 1-2.829-2.828l1.767-1.767-2.828-2.828 1.767-1.768a2 2 0 1 1-2.828-2.828l2.828 2.828 1.768-1.767 2.828 2.828-1.767 1.767a2 2 0 1 1 2.828 2.829l1.767-1.767 2.828 2.828-1.767 1.767a2 2 0 1 1 2.829 2.828l-1.768-1.767-2.828-2.828 1.767-1.767a2 2 0 1 1 2.828 2.829l-1.767 1.767 2.828 2.828-1.767 1.767Z"/></svg></span>
-            <span class="nav-item-label">EMG</span>
+            <span class="nav-icon">💪</span>
+            <span class="nav-item-label">EMG Engine</span>
         </a>
 
-        <div class="nav-label">Learning</div>
-        <a href="dashboard.php?page=electrode_placement" class="nav-item <?= $page==='electrode_placement'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-map-pin"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg></span>
-            <span class="nav-item-label">Placement Guide</span>
-        </a>
-        <a href="dashboard.php?page=recording_techniques" class="nav-item <?= $page==='recording_techniques'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-cpu"><rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9" rx="1"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></svg></span>
-            <span class="nav-item-label">Recording Tech</span>
-        </a>
-        <a href="dashboard.php?page=bipolar_recording" class="nav-item <?= $page==='bipolar_recording'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-dna"><path d="m8 8 8 8"/><path d="m8 16 8-8"/><path d="m13 3 3 3"/><path d="m9 19 3 3"/><path d="m18 8 3 3"/><path d="m2 13 3 3"/><path d="m21 13-3 3"/><path d="m5 8-3 3"/><path d="m13 21 3-3"/><path d="m9 5 3-3"/></svg></span>
-            <span class="nav-item-label">Bipolar Recording</span>
-        </a>
-        <a href="dashboard.php?page=monopolar_recording" class="nav-item <?= $page==='monopolar_recording'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-waves"><path d="M2 6c.6.5 1.2 1 2.5 1C7 7 7 5 9.5 5c2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 12c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/><path d="M2 18c.6.5 1.2 1 2.5 1 2.5 0 2.5-2 5-2 2.6 0 2.4 2 5 2 2.5 0 2.5-2 5-2 1.3 0 1.9.5 2.5 1"/></svg></span>
-            <span class="nav-item-label">Monopolar Recording</span>
+        <div class="nav-label">Education</div>
+        <a href="dashboard.php?page=learn" class="nav-item <?= $page==='learn'?'active':'' ?>">
+            <span class="nav-icon">📚</span>
+            <span class="nav-item-label">Learning Academy</span>
         </a>
         <a href="dashboard.php?page=quiz" class="nav-item <?= $page==='quiz'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-help-circle"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" x2="12.01" y1="17" y2="17"/></svg></span>
-            <span class="nav-item-label">Take Quiz</span>
-        </a>
-        <a href="dashboard.php?page=clinical" class="nav-item <?= $page==='clinical'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-stethoscope"><path d="M4.8 2.3A.3.3 0 1 0 5 2H4a2 2 0 0 0-2 2v5a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6V4a2 2 0 0 0-2-2h-1a.2.2 0 1 0 .3.3"/><path d="M8 15v1a6 6 0 0 0 6 6v0a6 6 0 0 0 6-6v-4"/><circle cx="20" cy="10" r="2"/></svg></span>
-            <span class="nav-item-label">Clinical Cases</span>
-        </a>
-        <a href="dashboard.php?page=report" class="nav-item <?= $page==='report'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-file-text"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><line x1="10" x2="8" y1="9" y2="9"/></svg></span>
-            <span class="nav-item-label">Comparison Report</span>
-        </a>
-        <a href="dashboard.php?page=resources" class="nav-item <?= $page==='resources'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-folder-open"><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5c0-1.1.9-2 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H18a2 2 0 0 1 2 2v2"/></svg></span>
-            <span class="nav-item-label">Resources Library</span>
-        </a>
-
-        <div class="nav-label">General</div>
-        <a href="dashboard.php?page=glossary" class="nav-item <?= $page==='glossary'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-book-open"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span>
-            <span class="nav-item-label">Glossary</span>
-        </a>
-        <a href="dashboard.php?page=settings" class="nav-item <?= $page==='settings'?'active':'' ?>">
-            <span class="nav-icon"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-settings"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></span>
-            <span class="nav-item-label">Settings</span>
+            <span class="nav-icon">❓</span>
+            <span class="nav-item-label">Knowledge Quiz</span>
         </a>
     </nav>
 
     <div class="sidebar-footer">
-        <a href="api/logout_api.php" class="logout-btn">
+        <a href="api/logout_api.php" class="logout-btn glass">
             <span>🚪</span>
-            <span class="logout-label">Logout</span>
+            <span class="logout-label">Sign Out</span>
         </a>
     </div>
 </aside>
 
 <!-- ═══ MAIN CONTENT ═══ -->
 <div class="main-content" id="mainArea">
-    <header class="topbar">
+    <header class="topbar glass">
         <div class="topbar-left">
-            <button class="tb-btn sidebar-toggle" id="sidebarToggle" title="Toggle Sidebar">☰</button>
+            <button class="tb-btn sidebar-toggle" id="sidebarToggle">☰</button>
             <div class="topbar-title">
-                <h1><?= $m ? $m['icon'].' '.$m['title'] : '🏠 Dashboard' ?></h1>
-                <p><?= $m ? $m['desc'] : 'Welcome back, '.$userName.'! Ready to explore signals?' ?></p>
+                <h1 class="fade-up"><?= $m ? $m['icon'].' '.$m['title'] : 'Explore Dashboard' ?></h1>
+                <p class="fade-up delay-1"><?= $m ? $m['desc'] : 'Welcome back, '.$userName.'.' ?></p>
             </div>
         </div>
         <div class="tb-right">
             <div class="tb-actions">
-                <button class="tb-btn" title="Notifications" style="position:relative;">
-                    🔔
-                    <span class="notification-dot"></span>
-                </button>
-                <button class="tb-btn" title="Help">❓</button>
+                <button class="tb-btn glass" title="System Notifications">🔔</button>
+                <button class="tb-btn glass" title="Settings">⚙️</button>
             </div>
-            <a href="dashboard.php?page=profile" class="tb-user">
-                <div class="tb-avatar" style="overflow:hidden;">
-                    <?php if (!empty($_SESSION['profile_image']) && file_exists($_SESSION['profile_image'])): ?>
-                        <img src="<?= htmlspecialchars($_SESSION['profile_image']) ?>" alt="Profile" style="width:100%;height:100%;object-fit:cover;">
-                    <?php else: ?>
-                        <?= $userInitial ?>
-                    <?php endif; ?>
+            <a href="dashboard.php?page=profile" class="tb-user glass-card">
+                <div class="tb-avatar">
+                   <?= $userInitial ?>
                 </div>
                 <span class="tb-user-name"><?= $userName ?></span>
             </a>
         </div>
     </header>
 
-    <div class="content-area">
+    <div class="content-area scroll-container">
 
     <?php if (!$m): // ═══ HOME PAGE ═══ ?>
 
         <!-- Welcome Banner -->
-        <div class="welcome-banner fade-up">
-            <div class="banner-text">
-                <div class="greeting">Welcome back</div>
-                <h2>Hello, <?= $userName ?>! 👋</h2>
-                <p>Ready to explore bioelectrode signals? Choose a module below to begin your learning journey.</p>
-                <div class="banner-btns">
-                    <a href="dashboard.php?page=learn" class="btn btn-primary btn-sm">Start Learning</a>
-                    <a href="dashboard.php?page=ai"    class="btn btn-secondary btn-sm">AI Analysis</a>
+        <div class="welcome-banner-premium glow-blue fade-up">
+            <div class="banner-content">
+                <div class="banner-tag">BIOELECTRODE AI v4.0</div>
+                <h2>Next-Gen Signal Intelligence</h2>
+                <p>Welcome back, <strong><?= $userName ?></strong>. You have 3 active signal modules and 1 pending quiz. Start your session today.</p>
+                <div class="banner-actions">
+                    <a href="dashboard.php?page=ai" class="btn btn-primary glow-blue">Launch AI Analyzer</a>
+                    <a href="dashboard.php?page=learn" class="btn btn-secondary glass">Explore Academy</a>
                 </div>
             </div>
-            <div class="banner-visual">
-                <div class="ecg-pulse">🫀</div>
+            <div class="banner-visual-elements">
+                <div class="pulse-ring"></div>
+                <div class="pulse-ring delay-1"></div>
+                <div class="floating-icon">🧠</div>
             </div>
         </div>
 
-        <!-- Modules -->
-        <div class="section-title fade-up delay-1">🔬 Explore Modules</div>
-        <div class="section-sub fade-up delay-1">Select a module to begin your signal analysis journey</div>
-        <div class="modules-grid">
-            <a href="dashboard.php?page=learn" class="module-card mc-blue fade-up delay-1">
-                <div class="mc-icon">📚</div>
-                <div>
-                    <div class="mc-title">Learn</div>
-                    <div class="mc-desc">Study topics</div>
-                </div>
-                <div class="mc-arrow">→</div>
-            </a>
-            <a href="dashboard.php?page=compare" class="module-card mc-teal fade-up delay-2">
-                <div class="mc-icon">⚡</div>
-                <div>
-                    <div class="mc-title">Compare</div>
-                    <div class="mc-desc">Side by side</div>
-                </div>
-                <div class="mc-arrow">→</div>
-            </a>
-            <a href="dashboard.php?page=simulator" class="module-card mc-orange fade-up delay-3">
-                <div class="mc-icon">🖥️</div>
-                <div>
-                    <div class="mc-title">Simulator</div>
-                    <div class="mc-desc">Interactive</div>
-                </div>
-                <div class="mc-arrow">→</div>
-            </a>
-            <a href="dashboard.php?page=ai" class="module-card mc-purple fade-up delay-4">
-                <div class="mc-icon">🧠</div>
-                <div>
-                    <div class="mc-title">AI Analysis</div>
-                    <div class="mc-desc">Smart insights</div>
-                </div>
-                <div class="mc-arrow">→</div>
-            </a>
-            <a href="dashboard.php?page=visualize" class="module-card mc-pink fade-up delay-5">
-                <div class="mc-icon">📊</div>
-                <div>
-                    <div class="mc-title">Visualizations</div>
-                    <div class="mc-desc">Graphs & charts</div>
-                </div>
-                <div class="mc-arrow">→</div>
-            </a>
+        <?php if (!empty($platformUpdates)): ?>
+        <!-- Latest Intelligence Feed -->
+        <div class="section-header-modern fade-up delay-1">
+            <span class="sh-icon">📢</span>
+            <div class="sh-text">
+                <h3>Intelligence Feed</h3>
+                <p>Latest platform updates and research findings</p>
+            </div>
+        </div>
+        <div class="intelligence-card glass-card fade-up delay-1">
+            <div class="ic-header">
+                <span class="badge-pulse"><?= strtoupper($platformUpdates[0]['type'] ?? 'UPDATE') ?></span>
+                <span class="ic-date"><?= date('M d, Y', strtotime($platformUpdates[0]['added_date'])) ?></span>
+            </div>
+            <h4><?= htmlspecialchars($platformUpdates[0]['title']) ?></h4>
+            <p><?= htmlspecialchars($platformUpdates[0]['description']) ?></p>
+            <a href="#" class="ic-link">Read Full Intelligence Report →</a>
+        </div>
+        <?php endif; ?>
 
+        <!-- Modules Grid -->
+        <div class="section-header-modern fade-up delay-2">
+            <span class="sh-icon">🚀</span>
+            <div class="sh-text">
+                <h3>Core Engines</h3>
+                <p>Access your primary research and diagnostic tools</p>
+            </div>
+        </div>
+        <div class="premium-modules-grid">
+            <a href="dashboard.php?page=ai" class="p-module glass-card fade-up delay-2">
+                <div class="pm-icon purple">🧠</div>
+                <div class="pm-info">
+                    <h4>AI Signal Analysis</h4>
+                    <span>Smart feature extraction</span>
+                </div>
+                <div class="pm-status online"></div>
+            </a>
+            <a href="dashboard.php?page=visualize" class="p-module glass-card fade-up delay-3">
+                <div class="pm-icon blue">📊</div>
+                <div class="pm-info">
+                    <h4>Data Visualization</h4>
+                    <span>Real-time waveform charts</span>
+                </div>
+            </a>
+            <a href="dashboard.php?page=compare" class="p-module glass-card fade-up delay-4">
+                <div class="pm-icon teal">⚖️</div>
+                <div class="pm-info">
+                    <h4>Signal Comparator</h4>
+                    <span>Bipolar vs Monopolar</span>
+                </div>
+            </a>
+            <a href="dashboard.php?page=simulator" class="p-module glass-card fade-up delay-5">
+                <div class="pm-icon orange">🖥️</div>
+                <div class="pm-info">
+                    <h4>Lab Simulator</h4>
+                    <span>Virtual electrode setup</span>
+                </div>
+            </a>
         </div>
 
         <div class="section-title fade-up">🚀 What you can do</div>
@@ -344,10 +391,10 @@ $m = $modules[$page] ?? null;
                 </div>
                 <span class="ac-arrow">›</span>
             </a>
-            <a href="dashboard.php?page=clinical" class="action-card fade-up delay-4">
+            <a href="dashboard.php?page=educational" class="action-card fade-up delay-4">
                 <div class="ac-icon" style="background:rgba(239, 68, 68, 0.15);color:#FCA5A5;">🏥</div>
                 <div>
-                    <div class="ac-title">Real Clinical Cases</div>
+                    <div class="ac-title">Real Practice Scenarios</div>
                     <div class="ac-subtitle">Explore actual medical scenarios</div>
                 </div>
                 <span class="ac-arrow">›</span>
@@ -446,6 +493,56 @@ $m = $modules[$page] ?? null;
             </a>
         </div>
 
+        <div class="mod-section-title"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-rocket" style="margin-right:8px; vertical-align:middle;"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.71-2.13.09-2.91a2.18 2.18 0 0 0-3.09-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg> Application Mastery</div>
+        <div class="mod-grid">
+            <a href="dashboard.php?page=simulator" class="mod-card">
+                <div class="mod-icon-wrap orange" style="background:rgba(249,115,22,0.15); border-color:#F97316;"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-monitor"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div>
+                <div class="mod-text">
+                    <div class="mod-title">Interactive Simulator</div>
+                    <div class="mod-desc">Hands-on practice with virtual recording equipment</div>
+                </div>
+                <div class="mod-arrow">›</div>
+            </a>
+            <a href="dashboard.php?page=signal_quality" class="mod-card">
+                <div class="mod-icon-wrap pink" style="background:rgba(219,39,119,0.15); border-color:#DB2777;"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bar-chart-big"><path d="M3 3v18h18"/><rect width="4" height="7" x="7" y="10" rx="1"/><rect width="4" height="12" x="15" y="5" rx="1"/></svg></div>
+                <div class="mod-text">
+                    <div class="mod-title">Signal Quality Hub</div>
+                    <div class="mod-desc">Master the assessment of real-time signal integrity</div>
+                </div>
+                <div class="mod-arrow">›</div>
+            </a>
+            <a href="dashboard.php?page=educational" class="mod-card">
+                <div class="mod-icon-wrap green" style="background:rgba(16,185,129,0.15); border-color:#10B981;"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-graduation-cap"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg></div>
+                <div class="mod-text">
+                    <div class="mod-title">Practice Scenarios</div>
+                    <div class="mod-desc">Apply your knowledge to real-world medical cases</div>
+                </div>
+                <div class="mod-arrow">›</div>
+            </a>
+        </div>
+
+        <div class="mod-section-title" id="quick-start"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-help-circle" style="margin-right:8px; vertical-align:middle;"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg> App Quick Start & Tips</div>
+        <div class="detail-card" style="background:rgba(37,99,235,0.05); border:1px solid rgba(37,99,235,0.1); border-radius:16px; margin-top:15px; margin-bottom: 40px;">
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:20px;">
+                <div class="educational-item" style="border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:12px;">
+                    <div class="educational-dot" style="background:var(--blue);"></div>
+                    <div><strong>Upload Any Dataset:</strong> Use the AI Analysis page to upload .csv or .txt files for instant signal feature extraction.</div>
+                </div>
+                <div class="educational-item" style="border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:12px;">
+                    <div class="educational-dot" style="background:var(--purple);"></div>
+                    <div><strong>Track Your Journey:</strong> Your progress and quiz scores are automatically saved in your <a href="dashboard.php?page=profile" style="color:var(--blue-l); text-decoration:none;">Personal Profile</a>.</div>
+                </div>
+                <div class="educational-item" style="border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:12px;">
+                    <div class="educational-dot" style="background:var(--teal);"></div>
+                    <div><strong>Compare Side-by-Side:</strong> Use the "Compare" module to see how Bipolar and Monopolar setups affect signal SNR in real-time.</div>
+                </div>
+                <div class="educational-item">
+                    <div class="educational-dot" style="background:var(--orange);"></div>
+                    <div><strong>Dark Mode Toggle:</strong> Find the theme switch in Settings to customize your visual experience.</div>
+                </div>
+            </div>
+        </div>
+
     <?php elseif ($page === 'ecg'): // ═══ ECG DETAIL ═══ ?>
 
         <a href="dashboard.php?page=learn" class="back-btn mb-16">← Back to Learn Topics</a>
@@ -460,16 +557,14 @@ $m = $modules[$page] ?? null;
 
         <div style="max-width:860px;">
             <div class="detail-card">
-                <div class="panel-title"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-lightbulb"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A5 5 0 0 0 8 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg></span> What is ECG?</div>
+                <div class="panel-title"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-lightbulb"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A5 5 0 0 0 8 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg></span> <?= htmlspecialchars($dynContent['intro']['title'] ?? 'What is ECG?') ?></div>
                 <div class="text-small">
-                    Electrocardiography (ECG or EKG) measures the electrical activity of the heart over time
-                    using electrodes placed on the skin. It captures the depolarization and repolarization of
-                    heart muscles during each cardiac cycle.
+                    <?= nl2br(htmlspecialchars($dynContent['intro']['content'] ?? "Electrocardiography (ECG or EKG) measures the electrical activity of the heart over time using electrodes placed on the skin. It captures the depolarization and repolarization of heart muscles during each cardiac cycle.")) ?>
                 </div>
             </div>
 
             <div class="detail-card">
-                <div class="panel-title"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bar-chart-3"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg></span> ECG Waveform Components</div>
+                <div class="panel-title"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-bar-chart-3"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg></span> ECG Waveform Components (Click to explore)</div>
 
                 <div style="background:#0D1224;border-radius:12px;margin-bottom:20px;border:1px solid rgba(255,255,255,0.06);overflow:hidden;">
                     <img src="images/ecg_waveform.png" alt="ECG Waveform"
@@ -477,17 +572,174 @@ $m = $modules[$page] ?? null;
                          onerror="this.style.display='none'">
                 </div>
 
-                <div class="wave-item"><div class="wave-dot" style="background:#F472B6;"></div><div><div class="wave-title">P Wave</div><div class="wave-desc">Atrial Depolarization — Atria contract to pump blood into ventricles</div></div></div>
-                <div class="wave-item"><div class="wave-dot" style="background:#60A5FA;"></div><div><div class="wave-title">QRS Complex</div><div class="wave-desc">Ventricular Depolarization — Ventricles contract to pump blood out</div></div></div>
-                <div class="wave-item"><div class="wave-dot" style="background:#34D399;"></div><div><div class="wave-title">T Wave</div><div class="wave-desc">Ventricular Repolarization — Ventricles relax and recover</div></div></div>
+                <div class="wave-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="wave-dot" style="background:#F472B6;"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div class="wave-title">P Wave</div>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="wave-desc">Atrial Depolarization — Atria contract to pump blood into ventricles</div>
+                        <div class="expand-detail">
+                            <p style="font-size:0.85rem; color:var(--text3);">The P wave represents the electrical impulse starting in the sinus node and spreading through the atria. Abnormalities can indicate atrial enlargement or conduction blocks.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="wave-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="wave-dot" style="background:#60A5FA;"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div class="wave-title">QRS Complex</div>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="wave-desc">Ventricular Depolarization — Ventricles contract to pump blood out</div>
+                        <div class="expand-detail">
+                            <p style="font-size:0.85rem; color:var(--text3);">This is the most visually prominent part of the ECG. Its width (duration) is critical—if it's too wide, it could mean a bundle branch block or ventricular rhythm.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="wave-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="wave-dot" style="background:#34D399;"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div class="wave-title">T Wave</div>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="wave-desc">Ventricular Repolarization — Ventricles relax and recover</div>
+                        <div class="expand-detail">
+                            <p style="font-size:0.85rem; color:var(--text3);">The T wave represents the recovery phase of the ventricles. Inverted T waves can be a sign of myocardial ischemia or electrolyte imbalances (like potassium levels).</p>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="detail-card">
-                <div class="panel-title"><span>🏥</span> Clinical Uses</div>
-                <div class="clinical-item"><div class="clinical-dot"></div>Detect arrhythmias (irregular heartbeats)</div>
-                <div class="clinical-item"><div class="clinical-dot"></div>Diagnose heart attacks (Myocardial Infarction)</div>
-                <div class="clinical-item"><div class="clinical-dot"></div>Monitor ongoing cardiac conditions</div>
-                <div class="clinical-item"><div class="clinical-dot"></div>Pre-surgical assessment & monitoring</div>
+                <div class="panel-title" style="color:var(--pink-l);"><span>📋</span> Systematic Interpretation (5-Step Method)</div>
+                <p class="text-small" style="margin-bottom:15px;">A professional protocol for analyzing any ECG strip (Click to expand):</p>
+                
+                <div class="educational-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="educational-dot" style="background:var(--pink);"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong>1. Rate & Rhythm</strong>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="expand-detail">
+                            <p style="font-size:0.85rem; color:var(--text3);">Calculate BPM (300 / large squares between R-waves). Determine if the rhythm is sinus (P-wave before every QRS) or irregular.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="educational-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="educational-dot" style="background:var(--blue);"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong>2. The Axis</strong>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="expand-detail">
+                            <p style="font-size:0.85rem; color:var(--text3);">Determines the overall direction of the heart's electrical vector. Left Axis Deviation (LAD) or Right Axis Deviation (RAD) can hint at underlying structural issues.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="educational-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="educational-dot" style="background:var(--teal);"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong>3. Hypertrophy</strong>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="expand-detail">
+                            <p style="font-size:0.85rem; color:var(--text3);">Assess for chamber enlargement. High R-wave voltage in V5-V6 suggests Left Ventricular Hypertrophy (LVH).</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="educational-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="educational-dot" style="background:var(--orange);"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong>4. Ischemia & Infarction</strong>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="expand-detail">
+                            <p style="font-size:0.85rem; color:var(--text3);">Look for ST-segment elevation (STEMI) or T-wave inversion, indicating oxygen deprivation to the heart muscle.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="detail-card">
+                <div class="panel-title" style="color:var(--blue-l);"><span>📡</span> The 12-Lead System Breakdown</div>
+                <div style="background:rgba(255,255,255,0.02); padding:20px; border-radius:12px; border:1px solid rgba(255,255,255,0.05);">
+                    <div style="display:flex; flex-direction:column; gap:12px;">
+                        <div class="expand-card" onclick="this.classList.toggle('active')" style="border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:8px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <strong style="color:var(--pink-l);">Limb Leads (I, II, III)</strong>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="expand-detail">
+                                <p style="color:var(--text3); font-size:0.85rem;">Standard bipolar leads forming Einthoven's Triangle. They view the heart in the frontal plane.</p>
+                            </div>
+                        </div>
+                        <div class="expand-card" onclick="this.classList.toggle('active')" style="border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:8px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <strong style="color:var(--blue-l);">Precordial Leads (V1-V6)</strong>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="expand-detail">
+                                <p style="color:var(--text3); font-size:0.85rem;">Unipolar leads placed directly on the chest. They provide a horizontal view, slicing the heart from front to back.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="detail-card">
+                <div class="panel-title"><span>🏥</span> Educational Uses (Click for details)</div>
+                
+                <div class="educational-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="educational-dot" style="background:var(--pink);"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong>Detect Arrhythmias</strong>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="expand-detail">
+                            <p style="font-size:0.85rem; color:var(--text3);">Analyze irregular heartbeats like Atrial Fibrillation (AFib), Bradycardia (slow heart), and Tachycardia (fast heart).</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="educational-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="educational-dot" style="background:var(--blue);"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong>Analyze Myocardial Infarction</strong>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="expand-detail">
+                            <p style="font-size:0.85rem; color:var(--text3);">Commonly known as a heart attack. ECG is the gold standard for identifying ST-segment elevation (STEMI).</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="educational-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="educational-dot" style="background:var(--teal);"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong>Monitor Hypertrophy</strong>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="expand-detail">
+                            <p style="font-size:0.85rem; color:var(--text3);">Thickening of the heart walls (like Left Ventricular Hypertrophy) causes increased voltage in specific leads like V5 and V6.</p>
+                        </div>
+                    </div>
+                </div>
+
             </div>
 
             <div class="detail-card">
@@ -500,12 +752,12 @@ $m = $modules[$page] ?? null;
                 </div>
             </div>
 
-            <div class="detail-card key-points">
-                <div class="panel-title"><span>🔑</span> Key Points</div>
-                <div class="key-item"><span class="key-dot">•</span> Standard 12-lead ECG uses both bipolar and monopolar leads.</div>
-                <div class="key-item"><span class="key-dot">•</span> Bipolar leads: I, II, III (Einthoven's triangle).</div>
-                <div class="key-item"><span class="key-dot">•</span> Monopolar leads: aVR, aVL, aVF, V1–V6.</div>
-                <div class="key-item"><span class="key-dot">•</span> Non-invasive, quick, and widely used diagnostic tool worldwide.</div>
+            <div class="detail-card key-points" style="border-left:4px solid var(--pink); background:rgba(244,114,182,0.03);">
+                <div class="panel-title"><span>🔑</span> Key Technical Takeaways</div>
+                <div class="key-item"><span class="key-dot" style="color:var(--pink);">•</span> <strong>Standard 12-lead ECG:</strong> Uses 10 electrodes to derive 12 distinct viewpoints of the heart's electrical vector.</div>
+                <div class="key-item"><span class="key-dot" style="color:var(--pink);">•</span> <strong>Einthoven's Triangle:</strong> The fundamental concept involving Leads I, II, and III forming a triangle around the heart.</div>
+                <div class="key-item"><span class="key-dot" style="color:var(--pink);">•</span> <strong>Wilson Central Terminal:</strong> A theoretical "zero" reference point used for unipolar precordial leads (V1-V6).</div>
+                <div class="key-item"><span class="key-dot" style="color:var(--pink);">•</span> Quick, non-invasive, and bedside-ready for immediate diagnostic screening.</div>
             </div>
 
             <!-- Next Button Section -->
@@ -516,7 +768,39 @@ $m = $modules[$page] ?? null;
             </div>
         </div>
 
-    <?php elseif ($page === 'profile'): // ═══ VIBRANT PROFILE PAGE ═══ ?>
+    <?php elseif ($page === 'profile'): // ═══ VIBRANT PROFILE PAGE ═══
+        require_once __DIR__ . '/api/db.php';
+        $_sdb = getDB();
+        $uid = $_SESSION['user_id'];
+        
+        $trackableModules = ['ecg', 'eeg', 'emg', 'electrode_placement', 'recording_techniques', 'compare', 'pros_cons', 'decision_guide', 'signal_quality', 'bipolar_recording', 'monopolar_recording'];
+        $totalMods = count($trackableModules);
+        
+        // Stats
+        $compS = $_sdb->prepare("SELECT COUNT(*) as c FROM user_progress WHERE user_id=? AND completion_percentage=100");
+        $compS->bind_param('i', $uid); $compS->execute();
+        $compCount = $compS->get_result()->fetch_assoc()['c']; $compS->close();
+        
+        $avgS = $_sdb->prepare("SELECT SUM(completion_percentage) as s FROM user_progress WHERE user_id=?");
+        $avgS->bind_param('i', $uid); $avgS->execute();
+        $totalP = $avgS->get_result()->fetch_assoc()['s'] ?? 0; $avgS->close();
+        $overallP = $totalMods > 0 ? round($totalP / ($totalMods * 100) * 100) : 0;
+        
+        // Activity
+        $recentAct = [];
+        $actS = $_sdb->prepare("SELECT module_name, completion_percentage, last_updated FROM user_progress WHERE user_id=? ORDER BY last_updated DESC LIMIT 3");
+        $actS->bind_param('i', $uid); $actS->execute();
+        $actRes = $actS->get_result();
+        while($ar = $actRes->fetch_assoc()) {
+            $mInf = $modules[$ar['module_name']] ?? ['title'=>$ar['module_name']];
+            $recentAct[] = [
+                't' => ($ar['completion_percentage']==100?'Completed ':'Studied ').$mInf['title'],
+                's' => 'Progress: '.$ar['completion_percentage'].'% • '.date('M d, H:i', strtotime($ar['last_updated'])),
+                'c' => ($ar['completion_percentage']==100?'dot-green':'dot-blue')
+            ];
+        }
+        $actS->close();
+    ?>
 
         <div class="module-hero" style="background:linear-gradient(135deg, rgba(37,99,235,0.1), rgba(124,58,237,0.1)); border:1px solid rgba(255,255,255,0.05); padding:30px; border-radius:24px;">
             <div class="hero-icon-box" style="background:var(--g-multi); color:#fff; border:none; box-shadow: 0 10px 30px rgba(124, 58, 237, 0.4); font-size:2.5rem;"><svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-user"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
@@ -548,12 +832,12 @@ $m = $modules[$page] ?? null;
                 
                 <div class="ph-stats">
                     <div class="ph-stat-item">
-                        <div class="ph-stat-val">70%</div>
+                        <div class="ph-stat-val"><?= $overallP ?>%</div>
                         <div class="ph-stat-label">Progress</div>
                     </div>
                     <div class="ph-stat-divider"></div>
                     <div class="ph-stat-item">
-                        <div class="ph-stat-val">12</div>
+                        <div class="ph-stat-val"><?= $compCount ?></div>
                         <div class="ph-stat-label">Completed</div>
                     </div>
                     <div class="ph-stat-divider"></div>
@@ -576,10 +860,10 @@ $m = $modules[$page] ?? null;
                                 <div class="sc-title" style="color:var(--blue-l); font-weight:700;">Study Time</div>
                                 <div class="sc-subtitle">Weekly Progress</div>
                             </div>
-                            <div class="sc-value" style="color:#fff;">12.5h</div>
+                            <div class="sc-value" style="color:#fff;"><?= round($overallP * 0.15, 1) ?>h</div>
                         </div>
                         <div class="sc-progress-bg" style="background:rgba(255,255,255,0.05); height:8px;">
-                            <div class="sc-progress-fill" style="width: 100%; background: var(--g-blue);"></div>
+                            <div class="sc-progress-fill" style="width: <?= $overallP ?>%; background: var(--g-blue);"></div>
                         </div>
                     </div>
 
@@ -587,13 +871,13 @@ $m = $modules[$page] ?? null;
                         <div class="sc-header">
                             <div class="sc-icon" style="background:var(--g-purple); color:#fff; box-shadow:0 4px 15px rgba(124,58,237,0.3);">🎯</div>
                             <div class="sc-text">
-                                <div class="sc-title" style="color:var(--purple-l); font-weight:700;">Quiz Average</div>
-                                <div class="sc-subtitle">Efficiency Score</div>
+                                <div class="sc-title" style="color:var(--purple-l); font-weight:700;">Knowledge Accuracy</div>
+                                <div class="sc-subtitle">Average Score</div>
                             </div>
-                            <div class="sc-value" style="color:#fff;">88%</div>
+                            <div class="sc-value" style="color:#fff;"><?= $overallP > 0 ? 80 + ($overallP * 0.15) : 0 ?>%</div>
                         </div>
                         <div class="sc-progress-bg" style="background:rgba(255,255,255,0.05); height:8px;">
-                            <div class="sc-progress-fill" style="width: 88%; background: var(--g-purple);"></div>
+                            <div class="sc-progress-fill" style="width: <?= min(100, 80 + ($overallP * 0.15)) ?>%; background: var(--g-purple);"></div>
                         </div>
                     </div>
 
@@ -612,27 +896,21 @@ $m = $modules[$page] ?? null;
                 <div class="profile-column">
                     <div class="section-title-small">Recent Activity</div>
                     <div class="activity-list">
-                        <div class="activity-item">
-                            <div class="activity-dot dot-green"></div>
-                            <div class="activity-text">
-                                <div class="at-title">Completed Quiz</div>
-                                <div class="at-subtitle" style="font-size:0.75rem;color:var(--text3);">Scored 90% on Electrode Techniques • 1 hour ago</div>
+                        <?php if(!empty($recentAct)): ?>
+                            <?php foreach($recentAct as $act): ?>
+                            <div class="activity-item">
+                                <div class="activity-dot <?= $act['c'] ?>"></div>
+                                <div class="activity-text">
+                                    <div class="at-title"><?= $act['t'] ?></div>
+                                    <div class="at-subtitle" style="font-size:0.75rem;color:var(--text3);"><?= $act['s'] ?></div>
+                                </div>
                             </div>
-                        </div>
-                        <div class="activity-item">
-                            <div class="activity-dot dot-blue"></div>
-                            <div class="activity-text">
-                                <div class="at-title">Studied Module</div>
-                                <div class="at-subtitle" style="font-size:0.75rem;color:var(--text3);">Monopolar Applications completed • 3 hours ago</div>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <div style="text-align:center; padding:30px; color:var(--text3); font-size:0.8rem;">
+                                No recent activity. Start learning!
                             </div>
-                        </div>
-                        <div class="activity-item">
-                            <div class="activity-dot dot-orange"></div>
-                            <div class="activity-text">
-                                <div class="at-title">Used AI Analysis</div>
-                                <div class="at-subtitle" style="font-size:0.75rem;color:var(--text3);">Analyzed DBS electrode setup • Yesterday</div>
-                            </div>
-                        </div>
+                        <?php endif; ?>
                     </div>
 
                     <div class="goals-card">
@@ -669,9 +947,9 @@ $m = $modules[$page] ?? null;
 
         <div style="max-width:860px;">
             <div class="detail-card">
-                <div class="panel-title"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-lightbulb"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A5 5 0 0 0 8 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg></span> What is EEG?</div>
+                <div class="panel-title"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-lightbulb"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A5 5 0 0 0 8 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg></span> <?= htmlspecialchars($dynContent['intro']['title'] ?? 'What is EEG?') ?></div>
                 <div class="text-small">
-                    Electroencephalography (EEG) records electrical activity of the brain through electrodes placed on the scalp. It monitors synchronized neuronal firing patterns, providing a window into brain function and neurological disorders.
+                    <?= nl2br(htmlspecialchars($dynContent['intro']['content'] ?? "Electroencephalography (EEG) records electrical activity of the brain through electrodes placed on the scalp. It monitors synchronized neuronal firing patterns, providing a window into brain function and neurological disorders.")) ?>
                 </div>
             </div>
 
@@ -691,11 +969,11 @@ $m = $modules[$page] ?? null;
             </div>
 
             <div class="detail-card">
-                <div class="panel-title"><span>🏥</span> Clinical Uses</div>
-                <div class="clinical-item"><div class="clinical-dot"></div>Epilepsy diagnosis & seizure detection</div>
-                <div class="clinical-item"><div class="clinical-dot"></div>Sleep disorders research</div>
-                <div class="clinical-item"><div class="clinical-dot"></div>Brain injury assessment</div>
-                <div class="clinical-item"><div class="clinical-dot"></div>Neurofeedback (BCI neurofeedback)</div>
+                <div class="panel-title"><span>🏥</span> Educational Uses</div>
+                <div class="educational-item"><div class="educational-dot"></div>Epilepsy analysis & seizure detection</div>
+                <div class="educational-item"><div class="educational-dot"></div>Sleep disorders research</div>
+                <div class="educational-item"><div class="educational-dot"></div>Brain injury assessment</div>
+                <div class="educational-item"><div class="educational-dot"></div>Neurofeedback (BCI neurofeedback)</div>
             </div>
 
             <div class="detail-card">
@@ -708,12 +986,126 @@ $m = $modules[$page] ?? null;
                 </div>
             </div>
 
-            <div class="detail-card key-points">
-                <div class="panel-title"><span>🔑</span> Recording Methods & Key Points</div>
-                <div class="key-item"><span class="key-dot">•</span> <strong>Bipolar Montage:</strong> Measures potential difference between two adjacent active electrodes on the scalp.</div>
-                <div class="key-item"><span class="key-dot">•</span> <strong>Monopolar (Referential):</strong> Measures each electrode against a common reference point (ear lobe or linked mastoids). Monopolar leads are widely used in clinical EEG.</div>
-                <div class="key-item"><span class="key-dot">•</span> Non-invasive, safe brain monitoring method.</div>
-                <div class="key-item"><span class="key-dot">•</span> Excellent temporal resolution (milliseconds) but limited spatial resolution compared to MRI.</div>
+            <div class="detail-card">
+                <div class="panel-title" style="color:#C4B5FD;"><span>🧠</span> Clinical Rhythms & Meaning (Click to explore)</div>
+                
+                <div class="educational-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="educational-dot" style="background:#7C3AED;"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong>Mu (μ) Rhythm [8-12 Hz]</strong>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="expand-detail">
+                            <p>Occurs over the motor cortex. It suppression (desynchronization) indicates movement or even the intent to move. In neurofeedback, mastering Mu suppression is key for BCI control.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="educational-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="educational-dot" style="background:#7C3AED;"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong>Sleep Spindles [12-14 Hz]</strong>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="expand-detail">
+                            <p>Bursts of brain activity during Stage 2 NREM sleep, essential for memory consolidation. They are thought to protect the brain from being woken up by external noise.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="educational-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="educational-dot" style="background:#7C3AED;"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong>K-Complexes</strong>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="expand-detail">
+                            <p>Large, high-amplitude waves during sleep that respond to external stimuli while sleeping. They represent a dual role: protecting sleep and brief arousal to evaluate the environment.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="detail-card" style="border-left:4px solid #F87171;">
+                <div class="panel-title" style="color:#F87171;"><span>⚠️</span> Common EEG Artifacts</div>
+                <p class="text-small" style="margin-bottom:15px;">EEG signals are extremely low amplitude (μV), making them highly susceptible to non-neural interference (Click to learn more):</p>
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
+                    <div class="param-box expand-card" onclick="this.classList.toggle('active')" style="background:rgba(239, 68, 68, 0.05); height:fit-content;">
+                        <div class="param-label" style="display:flex; justify-content:space-between;">EOG (Ocular) <span class="expand-icon">▼</span></div>
+                        <div class="param-value" style="font-size:0.85rem;">Eye blinks create massive voltage spikes.</div>
+                        <div class="expand-detail" style="font-size:0.75rem; color: #fca5a5;">
+                            Blinks act like dipole shifts. Pro-tip: Monitor Fp1/Fp2 to identify ocular artifacts vs. frontal neural events.
+                        </div>
+                    </div>
+                    <div class="param-box expand-card" onclick="this.classList.toggle('active')" style="background:rgba(239, 68, 68, 0.05); height:fit-content;">
+                        <div class="param-label" style="display:flex; justify-content:space-between;">EMG (Muscle) <span class="expand-icon">▼</span></div>
+                        <div class="param-value" style="font-size:0.85rem;">Jaw clenching creates high-frequency noise.</div>
+                        <div class="expand-detail" style="font-size:0.75rem; color: #fca5a5;">
+                            Filtering > 30Hz often removes EMG but can also clip Gamma waves. Relaxation techniques are preferred.
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="detail-card">
+                <div class="panel-title" style="color:#60A5FA;"><span>📍</span> Anatomical Mapping (10-20 System)</div>
+                <p class="text-small">Click any region to see its neuro-educational importance:</p>
+                <div style="background:rgba(255,255,255,0.02); padding:20px; border-radius:12px; border:1px solid rgba(255,255,255,0.05);">
+                    <div style="display:flex; flex-direction:column; gap:12px;">
+                        
+                        <div class="expand-card" onclick="this.classList.toggle('active')" style="border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:8px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="color:var(--purple-l); font-weight:700;">F (Frontal Region)</span>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="expand-detail">
+                                <p style="color:var(--text3); font-size:0.85rem;">Focus: Higher cognitive function, planning, personality, and voluntary movement. Electrodes F3/F4 are key for cognitive load analysis.</p>
+                            </div>
+                        </div>
+
+                        <div class="expand-card" onclick="this.classList.toggle('active')" style="border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:8px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="color:var(--blue-l); font-weight:700;">C (Central Region)</span>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="expand-detail">
+                                <p style="color:var(--text3); font-size:0.85rem;">Focus: Primary motor and sensory processing. Cz is the most common reference or vertex point for educational montages.</p>
+                            </div>
+                        </div>
+
+                        <div class="expand-card" onclick="this.classList.toggle('active')" style="border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:8px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="color:var(--teal-l); font-weight:700;">T (Temporal Region)</span>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="expand-detail">
+                                <p style="color:var(--text3); font-size:0.85rem;">Focus: Auditory processing, language comprehension (Wernicke's area), and memory formation. Sensitive to jaw artifacts.</p>
+                            </div>
+                        </div>
+
+                        <div class="expand-card" onclick="this.classList.toggle('active')" style="border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:8px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="color:var(--pink-l); font-weight:700;">O (Occipital Region)</span>
+                                <span class="expand-icon">▼</span>
+                            </div>
+                            <div class="expand-detail">
+                                <p style="color:var(--text3); font-size:0.85rem;">Focus: Visual processing center. Electrodes O1/O2 show the cleanest Alpha waves when a subject's eyes are closed.</p>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+
+            <div class="detail-card key-points" style="border-left:4px solid #7C3AED; background:rgba(124, 58, 237, 0.03);">
+                <div class="panel-title"><span>🔑</span> Advanced Analysis & Key Points</div>
+                <div class="key-item"><span class="key-dot">•</span> <strong>Fourier Transform (FFT):</strong> The primary mathematical tool used to convert raw EEG (time domain) into frequency bands (Delta, Alpha, etc.).</div>
+                <div class="key-item"><span class="key-dot">•</span> <strong>Evoked Potentials (EP):</strong> Brain responses recorded in relation to a specific stimulus (Flash of light, Click sound).</div>
+                <div class="key-item"><span class="key-dot">•</span> <strong>Impedance Gold Standard:</strong> Always strive for &lt; 5kΩ per electrode to minimize thermal noise floor.</div>
+                <div class="key-item"><span class="key-dot">•</span> EEG provides unmatched temporal resolution (milliseconds) but low spatial resolution compared to fMRI.</div>
             </div>
 
             <!-- Next Button Section -->
@@ -738,14 +1130,14 @@ $m = $modules[$page] ?? null;
 
         <div style="max-width:860px;">
             <div class="detail-card">
-                <div class="panel-title"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-lightbulb"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A5 5 0 0 0 8 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg></span> What is EMG?</div>
+                <div class="panel-title"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-lightbulb"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A5 5 0 0 0 8 8c0 1.3.5 2.6 1.5 3.5.8.8 1.3 1.5 1.5 2.5"/><path d="M9 18h6"/><path d="M10 22h4"/></svg></span> <?= htmlspecialchars($dynContent['intro']['title'] ?? 'What is EMG?') ?></div>
                 <div class="text-small">
-                    Electromyography (EMG) measures the electrical activity produced by skeletal muscles. When muscles are active, they produce electrical signals that are proportional to the level of muscle contraction. EMG is essential for diagnosing neuromuscular disorders and assessing muscle function.
+                    <?= nl2br(htmlspecialchars($dynContent['intro']['content'] ?? "Electromyography (EMG) measures the electrical activity produced by skeletal muscles. When muscles are active, they produce electrical signals that are proportional to the level of muscle contraction. EMG is essential for diagnosing neuromuscular disorders and assessing muscle function.")) ?>
                 </div>
             </div>
 
             <div class="detail-card">
-                <div class="panel-title"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-activity"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span> EMG Signal Patterns</div>
+                <div class="panel-title"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-activity"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span> EMG Signal Patterns (Click to explore)</div>
                 
                 <div style="background:#0D1224;border-radius:12px;margin-bottom:24px;border:1px solid rgba(20,184,166,0.3);overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,0.5);">
                     <img src="images/emg_signal.png" alt="EMG Signal Visualization"
@@ -753,36 +1145,109 @@ $m = $modules[$page] ?? null;
                          onerror="this.style.display='none'">
                 </div>
 
-                <div class="wave-item"><div class="wave-dot" style="background:#2DD4BF;"></div><div><div class="wave-title">At Rest</div><div class="wave-desc">Minimal electrical activity — Baseline noise only</div></div></div>
-                <div class="wave-item"><div class="wave-dot" style="background:#10B981;"></div><div><div class="wave-title">Light Contraction</div><div class="wave-desc">Few motor units firing — Low amplitude spikes</div></div></div>
-                <div class="wave-item"><div class="wave-dot" style="background:#F59E0B;"></div><div><div class="wave-title">Moderate Contraction</div><div class="wave-desc">Multiple motor units active — Increased interference pattern</div></div></div>
-                <div class="wave-item"><div class="wave-dot" style="background:#EF4444;"></div><div><div class="wave-title">Maximum Contraction</div><div class="wave-desc">All motor units recruited — Dense interference pattern</div></div></div>
+                <div class="wave-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="wave-dot" style="background:#2DD4BF;"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div class="wave-title">At Rest</div>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="wave-desc">Minimal electrical activity — Baseline noise only</div>
+                        <div class="expand-detail">
+                            <p style="font-size:0.85rem; color:var(--text3);">Healthy muscles at rest should show almost no electrical activity. Spontaneous activity during rest (like fibrillations) can be a sign of nerve damage or muscle disease.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="wave-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="wave-dot" style="background:#10B981;"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div class="wave-title">Light Contraction</div>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="wave-desc">Few motor units firing — Low amplitude spikes</div>
+                        <div class="expand-detail">
+                            <p style="font-size:0.85rem; color:var(--text3);">As the muscle begins to contract, individual Motor Unit Action Potentials (MUAPs) can be identified. This is where clinicians analyze the shape and duration of individual pulses.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="wave-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="wave-dot" style="background:#EF4444;"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div class="wave-title">Maximum Contraction</div>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="wave-desc">Dense interference pattern — Full recruitment</div>
+                        <div class="expand-detail">
+                            <p style="font-size:0.85rem; color:var(--text3);">During full effort, so many motor units fire that the individual pulses blur into a "Full Interference Pattern." The amplitude here is proportional to the total muscle strength output.</p>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="detail-card">
-                <div class="panel-title"><span>🏥</span> Clinical Uses & Applications</div>
-                <div class="clinical-item"><div class="clinical-dot" style="background:#14B8A6;"></div>Neuromuscular disease diagnosis (Myopathy, Neuropathy)</div>
-                <div class="clinical-item"><div class="clinical-dot" style="background:#14B8A6;"></div>Muscle function assessment & Biofeedback</div>
-                <div class="clinical-item"><div class="clinical-dot" style="background:#14B8A6;"></div>Rehabilitation monitoring & Physical therapy</div>
-                <div class="clinical-item"><div class="clinical-dot" style="background:#14B8A6;"></div>Sports performance & Kinesiology evaluation</div>
+                <div class="panel-title"><span>🏥</span> Educational Uses & Applications (Click for details)</div>
+                
+                <div class="educational-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="educational-dot" style="background:#14B8A6;"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong>Neuromuscular Diagnosis</strong>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="expand-detail">
+                            <p style="font-size:0.85rem; color:var(--text3);">Essential for identifying conditions like Carpal Tunnel Syndrome, ALS (Lou Gehrig's disease), and Muscular Dystrophy.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="educational-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="educational-dot" style="background:#14B8A6;"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong>Prosthetics Control</strong>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="expand-detail">
+                            <p style="font-size:0.85rem; color:var(--text3);">Modern bionic limbs use surface EMG (sEMG) to detect a user's intent to move their hand or arm, allowing for intuitive control.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="educational-item expand-card" onclick="this.classList.toggle('active')">
+                    <div class="educational-dot" style="background:#14B8A6;"></div>
+                    <div style="flex:1;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <strong>Sports Science</strong>
+                            <span class="expand-icon">▼</span>
+                        </div>
+                        <div class="expand-detail">
+                            <p style="font-size:0.85rem; color:var(--text3);">Athletes use EMG to analyze muscle fatigue and ensure they are recruiting the correct muscles during complex movements like squats or sprints.</p>
+                        </div>
+                    </div>
+                </div>
+
             </div>
 
             <div class="detail-card">
                 <div class="panel-title"><span>⚡</span> Recording Parameters</div>
                 <div class="param-grid">
-                    <div class="param-box"><div class="param-label">Frequency Range</div><div class="param-value">10 - 900 Hz</div></div>
+                    <div class="param-box"><div class="param-label">Frequency Range</div><div class="param-value">10 - 500 Hz</div></div>
                     <div class="param-box"><div class="param-label">Amplitude</div><div class="param-value">50 μV - 5 mV</div></div>
-                    <div class="param-box"><div class="param-label">Sample Rate</div><div class="param-value">1 - 10 kHz</div></div>
-                    <div class="param-box"><div class="param-label">Electrode Type</div><div class="param-value">Surface/Needle</div></div>
+                    <div class="param-box"><div class="param-label">Sample Rate</div><div class="param-value">2 - 4 kHz</div></div>
+                    <div class="param-box"><div class="param-label">Electrode Type</div><div class="param-value">Surface / Needle</div></div>
                 </div>
             </div>
 
             <div class="detail-card key-points" style="border-left:4px solid #14B8A6; background:rgba(20,184,166,0.05);">
                 <div class="panel-title"><span>🔑</span> Key Technical Points</div>
-                <div class="key-item"><span class="key-dot" style="color:#14B8A6;">•</span> <strong>sEMG:</strong> Non-invasive surface EMG for general muscle group monitoring.</div>
-                <div class="key-item"><span class="key-dot" style="color:#14B8A6;">•</span> <strong>iEMG:</strong> Intramuscular/Needle EMG for high-fidelity individual motor unit recording.</div>
-                <div class="key-item"><span class="key-dot" style="color:#14B8A6;">•</span> Skin preparation (cleaning and abrasion) is CRITICAL for high-quality signal acquisition.</div>
-                <div class="key-item"><span class="key-dot" style="color:#14B8A6;">•</span> Bipolar configurations are preferred to eliminate common-mode noise and cross-talk.</div>
+                <div class="key-item"><span class="key-dot" style="color:#14B8A6;">•</span> <strong>sEMG vs. iEMG:</strong> Surface EMG is for global analysis, while Intramuscular (Needle) EMG is for deep, specific motor unit study.</div>
+                <div class="key-item"><span class="key-dot" style="color:#14B8A6;">•</span> <strong>Common Mode Rejection:</strong> Bipolar setups are mandatory to cancel the noise from 60Hz power lines and nearby muscles (crosstalk).</div>
+                <div class="key-item"><span class="key-dot" style="color:#14B8A6;">•</span> <strong>RMS Calculation:</strong> Root Mean Square is the standard mathematical way to quantify the "power" or intensity of an EMG signal.</div>
+                <div class="key-item"><span class="key-dot" style="color:#14B8A6;">•</span> High-fidelity recording requires skin impedance to be reduced through thorough cleaning.</div>
             </div>
 
             <!-- Next Button Section -->
@@ -807,6 +1272,13 @@ $m = $modules[$page] ?? null;
 
         <div style="max-width:900px;">
             <div class="detail-card">
+                <div class="panel-title"><span>📍</span> <?= htmlspecialchars($dynContent['intro']['title'] ?? 'Electrode Placement Guide') ?></div>
+                <div class="text-small">
+                    <?= nl2br(htmlspecialchars($dynContent['intro']['content'] ?? "Standardized protocols for signal acquisition ensure consistency and reliability in biomedical signal recording. Proper placement is the foundation of accurate data collection.")) ?>
+                </div>
+            </div>
+
+            <div class="detail-card">
                 <div class="panel-title"><span>🎨</span> Select Recording Area</div>
                 <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:12px; margin-top:15px;">
                     <button class="btn btn-outline tabs-btn active" onclick="showPlacement('ecg-p')">❤️ ECG</button>
@@ -825,12 +1297,12 @@ $m = $modules[$page] ?? null;
                     </div>
 
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:20px;">
-                        <div class="clinical-item" style="background:rgba(255,255,255,0.03); padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);"><strong>RA / LA:</strong> Right & Left Arms</div>
-                        <div class="clinical-item" style="background:rgba(255,255,255,0.03); padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);"><strong>RL / LL:</strong> Right (Ground) & Left Legs</div>
-                        <div class="clinical-item" style="background:rgba(255,255,255,0.03); padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);"><strong>V1:</strong> 4th ICS, Right sternal border</div>
-                        <div class="clinical-item" style="background:rgba(255,255,255,0.03); padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);"><strong>V2:</strong> 4th ICS, Left sternal border</div>
-                        <div class="clinical-item" style="background:rgba(255,255,255,0.03); padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);"><strong>V3:</strong> Midway between V2 and V4</div>
-                        <div class="clinical-item" style="background:rgba(255,255,255,0.03); padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);"><strong>V4:</strong> 5th ICS, Midclavicular line</div>
+                        <div class="educational-item" style="background:rgba(255,255,255,0.03); padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);"><strong>RA / LA:</strong> Right & Left Arms</div>
+                        <div class="educational-item" style="background:rgba(255,255,255,0.03); padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);"><strong>RL / LL:</strong> Right (Ground) & Left Legs</div>
+                        <div class="educational-item" style="background:rgba(255,255,255,0.03); padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);"><strong>V1:</strong> 4th ICS, Right sternal border</div>
+                        <div class="educational-item" style="background:rgba(255,255,255,0.03); padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);"><strong>V2:</strong> 4th ICS, Left sternal border</div>
+                        <div class="educational-item" style="background:rgba(255,255,255,0.03); padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);"><strong>V3:</strong> Midway between V2 and V4</div>
+                        <div class="educational-item" style="background:rgba(255,255,255,0.03); padding:10px; border-radius:8px; border:1px solid rgba(255,255,255,0.05);"><strong>V4:</strong> 5th ICS, Midclavicular line</div>
                     </div>
                 </div>
             </div>
@@ -847,10 +1319,10 @@ $m = $modules[$page] ?? null;
                     <div style="background:rgba(37,99,235,0.05); padding:20px; border-radius:15px; border:1px solid rgba(37,99,235,0.1); margin-bottom:20px;">
                         <p class="text-small">The 10-20 system ensures standardized electrode placement by using anatomical landmarks: Nasion (bridge of nose) and Inion (bump at back of skull).</p>
                     </div>
-                    <div class="clinical-item"><strong>Fp:</strong> Frontal Pole (Forehead)</div>
-                    <div class="clinical-item"><strong>F / C / P / O:</strong> Frontal, Central, Parietal, Occipital</div>
-                    <div class="clinical-item"><strong>T:</strong> Temporal (Auditoy/Language)</div>
-                    <div class="clinical-item" style="color:var(--purple-l);"><strong>Z:</strong> Midline electrodes (Fz, Cz, Pz)</div>
+                    <div class="educational-item"><strong>Fp:</strong> Frontal Pole (Forehead)</div>
+                    <div class="educational-item"><strong>F / C / P / O:</strong> Frontal, Central, Parietal, Occipital</div>
+                    <div class="educational-item"><strong>T:</strong> Temporal (Auditoy/Language)</div>
+                    <div class="educational-item" style="color:var(--purple-l);"><strong>Z:</strong> Midline electrodes (Fz, Cz, Pz)</div>
                 </div>
             </div>
 
@@ -863,9 +1335,9 @@ $m = $modules[$page] ?? null;
                         <img src="images/bipolar_monopolar.png" alt="EMG Bipolar Recording Diagram" style="width:100%; height:auto; display:block;">
                     </div>
 
-                    <div class="clinical-item"><strong>Muscle Belly:</strong> Place active electrodes over the meat of the muscle.</div>
-                    <div class="clinical-item"><strong>Alignment:</strong> Electrodes should be parallel to muscle fiber direction.</div>
-                    <div class="clinical-item"><strong>Ground:</strong> Always place over a bony prominence (ankles, elbows).</div>
+                    <div class="educational-item"><strong>Muscle Belly:</strong> Place active electrodes over the meat of the muscle.</div>
+                    <div class="educational-item"><strong>Alignment:</strong> Electrodes should be parallel to muscle fiber direction.</div>
+                    <div class="educational-item"><strong>Ground:</strong> Always place over a bony prominence (ankles, elbows).</div>
                 </div>
             </div>
 
@@ -878,9 +1350,9 @@ $m = $modules[$page] ?? null;
 
             <div class="detail-card check-list" style="background:rgba(16,185,129,0.05); border-left:4px solid #10B981;">
                 <div class="panel-title" style="color:#10B981;"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-check-circle-2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/><path d="m9 12 2 2 4-4"/></svg></span> Pre-Recording Checklist</div>
-                <div class="clinical-item"><div class="clinical-dot" style="background:#10B981;"></div>Skin properly cleaned and prepared?</div>
-                <div class="clinical-item"><div class="clinical-dot" style="background:#10B981;"></div>Electrodes in correct anatomical position?</div>
-                <div class="clinical-item"><div class="clinical-dot" style="background:#10B981;"></div>Impedance checked and within acceptable range (< 5kΩ)?</div>
+                <div class="educational-item"><div class="educational-dot" style="background:#10B981;"></div>Skin properly cleaned and prepared?</div>
+                <div class="educational-item"><div class="educational-dot" style="background:#10B981;"></div>Electrodes in correct anatomical position?</div>
+                <div class="educational-item"><div class="educational-dot" style="background:#10B981;"></div>Impedance checked and within acceptable range (< 5kΩ)?</div>
             </div>
 
             <!-- Next Button Section -->
@@ -933,9 +1405,9 @@ $m = $modules[$page] ?? null;
                     <p class="text-small" style="margin-bottom:15px;">Measures the difference between two active electrodes placed close together above the signal source.</p>
                     
                     <div class="check-list">
-                        <div class="clinical-item"><div class="clinical-dot" style="background:#10B981;"></div><strong>Noise Rejection:</strong> Superior CMRR (Common Mode Rejection Ratio).</div>
-                        <div class="clinical-item"><div class="clinical-dot" style="background:#10B981;"></div><strong>Resolution:</strong> High spatial resolution for localizing activity.</div>
-                        <div class="clinical-item"><div class="clinical-dot" style="background:#EF4444;"></div><strong>Complexity:</strong> Requires precise placement.</div>
+                        <div class="educational-item"><div class="educational-dot" style="background:#10B981;"></div><strong>Noise Rejection:</strong> Superior CMRR (Common Mode Rejection Ratio).</div>
+                        <div class="educational-item"><div class="educational-dot" style="background:#10B981;"></div><strong>Resolution:</strong> High spatial resolution for localizing activity.</div>
+                        <div class="educational-item"><div class="educational-dot" style="background:#EF4444;"></div><strong>Complexity:</strong> Requires precise placement.</div>
                     </div>
                 </div>
 
@@ -945,9 +1417,9 @@ $m = $modules[$page] ?? null;
                     <p class="text-small" style="margin-bottom:15px;">Measures signal from one active electrode against a distant, neutral reference electrode.</p>
                     
                     <div class="check-list">
-                        <div class="clinical-item"><div class="clinical-dot" style="background:#10B981;"></div><strong>Amplitude:</strong> Higher signal amplitude (absolute potential).</div>
-                        <div class="clinical-item"><div class="clinical-dot" style="background:#10B981;"></div><strong>Setup:</strong> Simple configuration, faster application.</div>
-                        <div class="clinical-item"><div class="clinical-dot" style="background:#EF4444;"></div><strong>Interference:</strong> Sensitive to ambient noise and artifacts.</div>
+                        <div class="educational-item"><div class="educational-dot" style="background:#10B981;"></div><strong>Amplitude:</strong> Higher signal amplitude (absolute potential).</div>
+                        <div class="educational-item"><div class="educational-dot" style="background:#10B981;"></div><strong>Setup:</strong> Simple configuration, faster application.</div>
+                        <div class="educational-item"><div class="educational-dot" style="background:#EF4444;"></div><strong>Interference:</strong> Sensitive to ambient noise and artifacts.</div>
                     </div>
                 </div>
             </div>
@@ -956,7 +1428,7 @@ $m = $modules[$page] ?? null;
             <div class="detail-card key-points" style="background:linear-gradient(to right, rgba(37,99,235,0.1), rgba(124,58,237,0.1)); border-left:4px solid #7C3AED;">
                 <div class="panel-title" style="color:#C4B5FD;"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-compass"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg></span> Decision Guide</div>
                 <div class="key-item"><strong>Use BIPOLAR when:</strong> Precision and noise rejection are critical (e.g., individual muscle unit EMG or focal seizure EEG).</div>
-                <div class="key-item"><strong>Use MONOPOLAR when:</strong> A broad field of view or absolute signal amplitude is needed (e.g., standard clinical EEG montage).</div>
+                <div class="key-item"><strong>Use MONOPOLAR when:</strong> A broad field of view or absolute signal amplitude is needed (e.g., standard educational EEG montage).</div>
             </div>
 
             <!-- Next Button Section -->
@@ -982,23 +1454,23 @@ $m = $modules[$page] ?? null;
         <div style="max-width:960px;">
             <!-- Advantages Section -->
             <div class="detail-card" style="border-left:4px solid #10B981;">
-                <div class="panel-title" style="color:#10B981;"><span>✅</span> Clinical Advantages</div>
+                <div class="panel-title" style="color:#10B981;"><span>✅</span> Educational Advantages</div>
                 <div class="check-list">
-                    <div class="clinical-item">
-                        <div class="clinical-dot" style="background:#10B981;"></div>
+                    <div class="educational-item">
+                        <div class="educational-dot" style="background:#10B981;"></div>
                         <strong>Superior Noise Rejection:</strong> Common-mode rejection eliminates ambient electrical noise.
                     </div>
-                    <div class="clinical-item">
-                        <div class="clinical-dot" style="background:#10B981;"></div>
+                    <div class="educational-item">
+                        <div class="educational-dot" style="background:#10B981;"></div>
                         <strong>High Spatial Resolution:</strong> Precise activity localization directly between the two electrodes.
                     </div>
-                    <div class="clinical-item">
-                        <div class="clinical-dot" style="background:#10B981;"></div>
+                    <div class="educational-item">
+                        <div class="educational-dot" style="background:#10B981;"></div>
                         <strong>Cleaner Waveforms:</strong> Minimal baseline drift and reduction in motion artifacts.
                     </div>
-                    <div class="clinical-item">
-                        <div class="clinical-dot" style="background:#10B981;"></div>
-                        <strong>High Diagnostic Accuracy:</strong> ~94% accuracy rate for precise signal localization.
+                    <div class="educational-item">
+                        <div class="educational-dot" style="background:#10B981;"></div>
+                        <strong>High Analytical Accuracy:</strong> ~94% accuracy rate for precise signal localization.
                     </div>
                 </div>
             </div>
@@ -1007,24 +1479,24 @@ $m = $modules[$page] ?? null;
             <div class="detail-card" style="border-left:4px solid #EF4444; background:rgba(239, 68, 68, 0.03);">
                 <div class="panel-title" style="color:#F87171;"><span>❌</span> Technical Limitations</div>
                 <div class="check-list">
-                    <div class="clinical-item">
-                        <div class="clinical-dot" style="background:#EF4444;"></div>
+                    <div class="educational-item">
+                        <div class="educational-dot" style="background:#EF4444;"></div>
                         <strong>Complex Setup:</strong> Requires extremely precise electrode positioning and inter-electrode spacing.
                     </div>
-                    <div class="clinical-item">
-                        <div class="clinical-dot" style="background:#EF4444;"></div>
+                    <div class="educational-item">
+                        <div class="educational-dot" style="background:#EF4444;"></div>
                         <strong>Lower Signal Amplitude:</strong> Since only the difference is recorded, the resultant signal is smaller than monopolar.
                     </div>
-                    <div class="clinical-item">
-                        <div class="clinical-dot" style="background:#EF4444;"></div>
+                    <div class="educational-item">
+                        <div class="educational-dot" style="background:#EF4444;"></div>
                         <strong>Higher Cost:</strong> More expensive equipment and specialized sensors are required.
                     </div>
                 </div>
             </div>
 
-            <!-- Clinical Visualizations -->
+            <!-- Educational Visualizations -->
             <div class="detail-card" style="border:none; background:transparent; padding:0;">
-                <div class="panel-title" style="color:var(--blue-l); margin-bottom:20px;"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-camera"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg></span> Clinical Visualizations</div>
+                <div class="panel-title" style="color:var(--blue-l); margin-bottom:20px;"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-camera"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg></span> Educational Visualizations</div>
                 <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:20px; margin-bottom:30px;">
                     <div style="background:rgba(255,255,255,0.03); border-radius:20px; border:1px solid rgba(255,255,255,0.08); overflow:hidden; transition:0.3s;" class="image-zoom">
                         <img src="images/img_bipolar_placement.png" alt="Bipolar Placement" style="width:100%; height:180px; object-fit:cover;">
@@ -1043,7 +1515,7 @@ $m = $modules[$page] ?? null;
 
             <!-- AI Insight for Bipolar -->
             <div class="detail-card key-points" style="background:rgba(124,58,237,0.05); border:1px solid rgba(124,58,237,0.2);">
-                <div class="panel-title" style="color:#A78BFA;"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-brain"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.54Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.54Z"/></svg></span> AI Clinical Recommendation</div>
+                <div class="panel-title" style="color:#A78BFA;"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-brain"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-2.54Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-2.54Z"/></svg></span> AI Educational Recommendation</div>
                 <div class="key-item"><strong>Recommendation:</strong> Use Bipolar configurations in high-EMI environments like Operating Rooms (OR) or ICUs where noise rejection is the top priority.</div>
             </div>
 
@@ -1083,24 +1555,24 @@ $m = $modules[$page] ?? null;
             <div class="detail-card" style="border-left:4px solid #F59E0B;">
                 <div class="panel-title" style="color:#FBBF24;"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-settings-2"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg></span> Key Characteristics</div>
                 <div class="check-list">
-                    <div class="clinical-item">
-                        <div class="clinical-dot" style="background:#FBBF24;"></div>
+                    <div class="educational-item">
+                        <div class="educational-dot" style="background:#FBBF24;"></div>
                         One active electrode placed near the signal source.
                     </div>
-                    <div class="clinical-item">
-                        <div class="clinical-dot" style="background:#FBBF24;"></div>
+                    <div class="educational-item">
+                        <div class="educational-dot" style="background:#FBBF24;"></div>
                         Distant reference electrode in an electrically neutral location.
                     </div>
-                    <div class="clinical-item">
-                        <div class="clinical-dot" style="background:#FBBF24;"></div>
+                    <div class="educational-item">
+                        <div class="educational-dot" style="background:#FBBF24;"></div>
                         Broader spatial coverage capturing signals from a larger tissue volume.
                     </div>
                 </div>
             </div>
 
-            <!-- Clinical Visualizations -->
+            <!-- Educational Visualizations -->
             <div class="detail-card" style="border:none; background:transparent; padding:0;">
-                <div class="panel-title" style="color:var(--blue-l); margin-bottom:20px;"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-camera"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg></span> Clinical Visualizations</div>
+                <div class="panel-title" style="color:var(--blue-l); margin-bottom:20px;"><span><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-camera"><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></svg></span> Educational Visualizations</div>
                 <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:20px; margin-bottom:30px;">
                     <div style="background:rgba(255,255,255,0.03); border-radius:20px; border:1px solid rgba(255,255,255,0.08); overflow:hidden;" class="image-zoom">
                         <img src="images/img_monopolar_placement.png" alt="Monopolar Placement" style="width:100%; height:180px; object-fit:cover;">
@@ -1274,7 +1746,7 @@ $m = $modules[$page] ?? null;
             <div class="hero-icon-box" style="background:var(--g-blue); border:none; box-shadow:0 10px 25px rgba(37,99,235,0.4);">⚖️</div>
             <div class="hero-text">
                 <h2 style="font-weight:800; letter-spacing:-1px;">Bipolar vs Monopolar</h2>
-                <p style="color:var(--blue-l); font-weight:500;">Complete technical & clinical comparison guide</p>
+                <p style="color:var(--blue-l); font-weight:500;">Complete technical & educational comparison guide</p>
             </div>
         </div>
 
@@ -1282,7 +1754,7 @@ $m = $modules[$page] ?? null;
             <!-- Modern Tab Navigation -->
             <div style="display:flex; gap:12px; margin-bottom:30px; background:rgba(255,255,255,0.03); padding:8px; border-radius:20px; border:1px solid rgba(255,255,255,0.06);">
                 <button class="tabs-btn active" onclick="switchCompareTab('tech')" style="flex:1; padding:14px; border-radius:14px; border:none; font-weight:700; cursor:pointer; transition:0.3s; background:transparent; color:rgba(255,255,255,0.5);">⚡ Technical</button>
-                <button class="tabs-btn" onclick="switchCompareTab('clin')" style="flex:1; padding:14px; border-radius:14px; border:none; font-weight:700; cursor:pointer; transition:0.3s; background:transparent; color:rgba(255,255,255,0.5);">🏥 Clinical</button>
+                <button class="tabs-btn" onclick="switchCompareTab('clin')" style="flex:1; padding:14px; border-radius:14px; border:none; font-weight:700; cursor:pointer; transition:0.3s; background:transparent; color:rgba(255,255,255,0.5);">🏥 Educational</button>
                 <button class="tabs-btn" onclick="switchCompareTab('prac')" style="flex:1; padding:14px; border-radius:14px; border:none; font-weight:700; cursor:pointer; transition:0.3s; background:transparent; color:rgba(255,255,255,0.5);">⚙️ Practical</button>
             </div>
 
@@ -1364,7 +1836,7 @@ $m = $modules[$page] ?? null;
             <!-- CLINICAL CONTENT -->
             <div id="clin-content" class="compare-content-tab" style="display:none;">
                 <div class="detail-card">
-                    <div class="panel-title" style="color:#fff;"><span>🏥</span> Clinical Efficacy</div>
+                    <div class="panel-title" style="color:#fff;"><span>🏥</span> Educational Efficacy</div>
                     
                     <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
                         <div style="background:rgba(37,99,235,0.05); padding:25px; border-radius:20px; border:1px solid rgba(37,99,235,0.15);">
@@ -1379,7 +1851,7 @@ $m = $modules[$page] ?? null;
                         <div style="background:rgba(20,184,166,0.05); padding:25px; border-radius:20px; border:1px solid rgba(20,184,166,0.15);">
                             <h4 style="color:#2DD4BF; margin-bottom:15px; display:flex; align-items:center; gap:10px;">🏥 Best for:</h4>
                             <ul style="list-style:none; padding:0; margin:0;">
-                                <li style="margin-bottom:10px; color:#E0E0E0;">• Standard Clinical EEG</li>
+                                <li style="margin-bottom:10px; color:#E0E0E0;">• Standard Educational EEG</li>
                                 <li style="margin-bottom:10px; color:#E0E0E0;">• Routine ECG Screenings</li>
                                 <li style="margin-bottom:10px; color:#E0E0E0;">• Sleep Studies (PSG)</li>
                                 <li style="color:#E0E0E0;">• Generalized Activity Analysis</li>
@@ -1451,7 +1923,7 @@ $m = $modules[$page] ?? null;
                 <div style="font-size:3rem; filter:drop-shadow(0 0 10px rgba(8,145,178,0.5)); transform:rotate(-5deg);">🤖</div>
                 <div style="flex:1;">
                     <h3 style="margin:0 0 8px 0; color:#fff; font-weight:800; font-family:'Space Grotesk', sans-serif; letter-spacing:-0.5px;">AI Selection Guide</h3>
-                    <p style="margin:0; color:#A5F3FC; line-height:1.6; font-size:0.95rem;">Choose <strong>Bipolar</strong> for high-precision focal detection in noisy EMI environments. Choose <strong>Monopolar</strong> for general clinical mapping and broader spatial coverage in quiet settings.</p>
+                    <p style="margin:0; color:#A5F3FC; line-height:1.6; font-size:0.95rem;">Choose <strong>Bipolar</strong> for high-precision focal detection in noisy EMI environments. Choose <strong>Monopolar</strong> for general educational mapping and broader spatial coverage in quiet settings.</p>
                 </div>
             </div>
 
@@ -1462,13 +1934,6 @@ $m = $modules[$page] ?? null;
                     Advanced Analysis Tools
                 </h3>
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
-                    <a href="dashboard.php?page=report" style="text-decoration:none; display:flex; align-items:center; justify-content:space-between; padding:20px; background:linear-gradient(135deg, rgba(37,99,235,0.1), rgba(37,99,235,0.05)); border:1px solid rgba(37,99,235,0.2); border-radius:20px; transition:0.3s;" onmouseover="this.style.transform='translateY(-3px)'; this.style.borderColor='rgba(37,99,235,0.5)'" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(37,99,235,0.2)'">
-                        <div style="display:flex; align-items:center; gap:15px;">
-                            <div style="width:40px; height:40px; background:var(--g-blue); border-radius:10px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:1.2rem;">📄</div>
-                            <div style="color:#fff; font-weight:600;">Comparison Report</div>
-                        </div>
-                        <span style="color:var(--blue-l);">→</span>
-                    </a>
                     <a href="dashboard.php?page=pros_cons" style="text-decoration:none; display:flex; align-items:center; justify-content:space-between; padding:20px; background:linear-gradient(135deg, rgba(16,185,129,0.1), rgba(16,185,129,0.05)); border:1px solid rgba(16,185,129,0.2); border-radius:20px; transition:0.3s;" onmouseover="this.style.transform='translateY(-3px)'; this.style.borderColor='rgba(16,185,129,0.5)'" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(16,185,129,0.2)'">
                         <div style="display:flex; align-items:center; gap:15px;">
                             <div style="width:40px; height:40px; background:var(--g-teal); border-radius:10px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:1.2rem;">⚖️</div>
@@ -1482,20 +1947,6 @@ $m = $modules[$page] ?? null;
                             <div style="color:#fff; font-weight:600;">Decision Guide Tool</div>
                         </div>
                         <span style="color:var(--orange-l);">→</span>
-                    </a>
-                    <a href="dashboard.php?page=signal_quality" style="text-decoration:none; display:flex; align-items:center; justify-content:space-between; padding:20px; background:linear-gradient(135deg, rgba(219,39,119,0.1), rgba(219,39,119,0.05)); border:1px solid rgba(219,39,119,0.2); border-radius:20px; transition:0.3s;" onmouseover="this.style.transform='translateY(-3px)'; this.style.borderColor='rgba(219,39,119,0.5)'" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(219,39,119,0.2)'">
-                        <div style="display:flex; align-items:center; gap:15px;">
-                            <div style="width:40px; height:40px; background:var(--g-pink); border-radius:10px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:1.2rem;">📡</div>
-                            <div style="color:#fff; font-weight:600;">Signal Quality Comparison</div>
-                        </div>
-                        <span style="color:var(--pink-l);">→</span>
-                    </a>
-                    <a href="dashboard.php?page=visualize" style="text-decoration:none; display:flex; align-items:center; justify-content:space-between; padding:20px; background:linear-gradient(135deg, rgba(139,92,246,0.1), rgba(139,92,246,0.05)); border:1px solid rgba(139,92,246,0.2); border-radius:20px; transition:0.3s;" onmouseover="this.style.transform='translateY(-3px)'; this.style.borderColor='rgba(139,92,246,0.5)'" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(139,92,246,0.2)'">
-                        <div style="display:flex; align-items:center; gap:15px;">
-                            <div style="width:40px; height:40px; background:var(--g-purple); border-radius:10px; display:flex; align-items:center; justify-content:center; color:#fff; font-size:1.2rem;">📊</div>
-                            <div style="color:#fff; font-weight:600;">View Visualizations</div>
-                        </div>
-                        <span style="color:var(--purple-l);">→</span>
                     </a>
                 </div>
             </div>
@@ -1549,7 +2000,7 @@ $m = $modules[$page] ?? null;
                     <div class="hero-icon-box" style="font-size:2.8rem; background:rgba(142,36,170,0.2); border-color:#8E24AA;">🧠</div>
                     <div class="hero-text">
                         <h2>Advanced AI Analysis</h2>
-                        <p style="color:#CE93D8;">Clinical-grade signal classification & configuration optimization</p>
+                        <p style="color:#CE93D8;">Educational-grade signal classification & configuration optimization</p>
                     </div>
                 </div>
 
@@ -1578,7 +2029,7 @@ $m = $modules[$page] ?? null;
                     <!-- Environment Noise Level Grid -->
                     <div class="detail-card">
                         <div class="panel-title" style="color:#CE93D8;"><span>2️⃣</span> Environment Noise Level</div>
-                        <p class="text-small" style="margin-bottom:20px;">Indicate the clinical environment to adjust noise filtering algorithms.</p>
+                        <p class="text-small" style="margin-bottom:20px;">Indicate the educational environment to adjust noise filtering algorithms.</p>
                         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; width: 100%;">
                             <div class="noise-card" id="aiNoiseLow" onclick="setAiNoise('Low')" style="background:rgba(255,255,255,0.03); border:2px solid rgba(255,255,255,0.1); border-radius:16px; padding:15px; text-align:center; cursor:pointer; position:relative; transition:0.3s;">
                                 <div style="font-size:1.5rem; margin-bottom:8px;">🍃</div>
@@ -1607,7 +2058,7 @@ $m = $modules[$page] ?? null;
                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:30px; margin-top:15px;">
                             <div>
                                 <h3 style="color:#fff; margin-bottom:10px; font-size:0.95rem;">Application Type</h3>
-                                <select id="aiAppSelector" onchange="autoFillDataset()" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; width:100%; color:#fff; cursor:pointer;">
+                                <select id="aiAppSelector" onchange="autoFillDataset()" style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:12px; padding:12px; width:100%; color:#fff; cursor:pointer; transition:0.3s;" onmouseover="this.style.borderColor='rgba(142,36,170,0.5)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.1)'">
                                     <option value="EEG" selected>EEG (Brain Waves)</option>
                                     <option value="ECG">ECG (Heart Rhythm)</option>
                                     <option value="EMG">EMG (Muscle Activity)</option>
@@ -1673,6 +2124,15 @@ $m = $modules[$page] ?? null;
                     </div>
                 </div>
 
+                <!-- NEW: Integrated Quality Score Card -->
+                <div id="ai-fidelity-card" style="display:none; background:linear-gradient(135deg, #10B981, #059669); padding:25px; border-radius:24px; margin-top:20px; display:flex; align-items:center; gap:20px; box-shadow:0 15px 35px rgba(16,185,129,0.3); animation: slideUp 0.5s ease-out;">
+                    <div id="ai-fidelity-score-bubble" style="width:70px; height:70px; border:4px solid rgba(255,255,255,0.3); border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:1.5rem; color:#fff;">92</div>
+                    <div>
+                        <h4 style="color:#fff; margin:0 0 5px 0;">Signal Fidelity Score</h4>
+                        <p id="ai-fidelity-desc" style="color:rgba(255,255,255,0.9); font-size:0.9rem; margin:0;">Analyzing signal purity...</p>
+                    </div>
+                </div>
+
                 <div style="display:grid; grid-template-columns:1fr 2fr; gap:20px; margin-top:20px;">
                     <!-- Recommendation Card -->
                     <div class="detail-card" style="text-align:center;">
@@ -1709,6 +2169,48 @@ $m = $modules[$page] ?? null;
                         </div>
                     </div>
                 </div>
+                <!-- Uploaded Signal Graph -->
+                <div class="detail-card" style="margin-top:20px; display:none;" id="ai-graph-container">
+                    <div class="panel-title" style="color:#fff;"><span>📈</span> Signal Visualization</div>
+                    <div style="background:#0A0E21; border-radius:12px; padding:10px; border:1px solid rgba(255,255,255,0.06);">
+                        <canvas id="aiSignalCanvas" width="900" height="150" style="width:100%; display:block;"></canvas>
+                    </div>
+                </div>
+
+                <!-- Signal Quality Analysis -->
+                <div class="detail-card" style="margin-top:20px;">
+                    <div class="panel-title" style="color:#fff;"><span>📡</span> Signal Quality Analysis</div>
+                    <div id="ai-quality-analysis">
+                        <p style="color:#94A3B8; font-size:0.9rem;">Processing signal characteristics...</p>
+                    </div>
+                </div>
+
+                <!-- Navigation & Detailed Modules -->
+                <div style="margin-top:30px; display:grid; grid-template-columns:1fr 1fr; gap:20px;">
+                    <!-- Option 1: Run Another Analysis -->
+                    <div class="detail-card" style="text-align:center; padding:25px; cursor:pointer; transition:0.3s; background:rgba(255,255,255,0.02); border:1px solid rgba(255,255,255,0.05);" onmouseover="this.style.borderColor='rgba(142,36,170,0.5)'; this.style.background='rgba(142,36,170,0.05)';" onmouseout="this.style.borderColor='rgba(255,255,255,0.05)'; this.style.background='rgba(255,255,255,0.02)';" onclick="resetAiSystem()">
+                        <div style="font-size:2rem; margin-bottom:12px;">↺</div>
+                        <h3 style="color:#fff; margin:0 0 5px 0; font-size:1rem;">New Analysis</h3>
+                        <p style="color:#94A3B8; font-size:0.8rem; margin:0;">Test different parameters</p>
+                    </div>
+
+                    <!-- Option 2: Deep Dive into Signal Quality Page -->
+                    <div class="detail-card" style="text-align:center; padding:25px; cursor:pointer; transition:0.3s; background:linear-gradient(135deg, rgba(20,184,166,0.1), rgba(16,185,129,0.05)); border:1px solid rgba(20,184,166,0.2);" onmouseover="this.style.transform='translateY(-5px)'; this.style.borderColor='rgba(20,184,166,0.5)'; this.style.boxShadow='0 12px 25px rgba(20,184,166,0.15)';" onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(20,184,166,0.2)'; this.style.boxShadow='none';" onclick="window.location.href='dashboard.php?page=signal_quality'">
+                        <div style="font-size:2rem; margin-bottom:12px; filter: drop-shadow(0 0 8px rgba(20,184,166,0.4));">📡</div>
+                        <h3 style="color:#fff; margin:0 0 5px 0; font-size:1rem;">Advanced Quality</h3>
+                        <p style="color:#99F6E4; font-size:0.8rem; margin:0;">Waveform analysis module</p>
+                    </div>
+                </div>
+
+                <!-- NEW: Premium Wide Back Home Card -->
+                <div class="detail-card" style="margin-top:20px; text-align:center; padding:30px; cursor:pointer; transition:0.4s; background:linear-gradient(135deg, rgba(37,99,235,0.15), rgba(79,70,229,0.1)); border:1px solid rgba(37,99,235,0.3); display:flex; align-items:center; justify-content:center; gap:25px;" onmouseover="this.style.transform='scale(1.02)'; this.style.borderColor='rgba(37,99,235,0.8)'; this.style.background='rgba(37,99,235,0.2)';" onmouseout="this.style.transform='scale(1)'; this.style.borderColor='rgba(37,99,235,0.3)'; this.style.background='linear-gradient(135deg, rgba(37,99,235,0.15), rgba(79,70,229,0.1))';" onclick="window.location.href='dashboard.php'">
+                    <div style="font-size:2.8rem; filter: drop-shadow(0 0 15px rgba(37,99,235,0.6));">🏠</div>
+                    <div style="text-align:left;">
+                        <h3 style="color:#fff; margin:0 0 5px 0; font-size:1.3rem; font-weight:800; letter-spacing:-0.5px;">Return to Main Dashboard</h3>
+                        <p style="color:#93C5FD; font-size:0.95rem; margin:0;">Exit AI Research and view core analyticals</p>
+                    </div>
+                    <div style="margin-left:auto; font-size:1.5rem; color:rgba(255,255,255,0.3);">❯</div>
+                </div>
             </div>
         </div>
 
@@ -1743,6 +2245,10 @@ $m = $modules[$page] ?? null;
             };
 
             function setAiElectrode(type) {
+                // Clear any manual file upload when switching back to configuration modes
+                const fileInput = document.getElementById('aiFileInput');
+                if(fileInput) fileInput.value = '';
+                
                 aiState.electrode = type;
                 document.querySelectorAll('.electrode-card').forEach(c => c.classList.remove('active'));
                 document.getElementById('aiCard' + type).classList.add('active');
@@ -1750,6 +2256,10 @@ $m = $modules[$page] ?? null;
             }
 
             function setAiNoise(level) {
+                // Clear any manual file upload
+                const fileInput = document.getElementById('aiFileInput');
+                if(fileInput) fileInput.value = '';
+
                 aiState.noise = level;
                 document.querySelectorAll('.noise-card').forEach(c => c.classList.remove('active'));
                 document.getElementById('aiNoise' + level).classList.add('active');
@@ -1831,10 +2341,10 @@ $m = $modules[$page] ?? null;
                 document.getElementById('ai-progress-view').style.display = 'block';
 
                 const steps = [
-                    { t: "Uploading dataset to AI Backend...", d: "Connecting to secure processing node.", p: 10, delay: 600 },
-                    { t: "Extracting Features...", d: "Analyzing frequency components and baseline wander.", p: 35, delay: 1200 },
-                    { t: "Analyzing Noise Profile...", d: "Detecting 50/60 Hz power-line interference and muscle artifact bursts.", p: 65, delay: 1200 },
-                    { t: "Generating Clinical Recommendations...", d: "Comparing SNR and CMRR projections against clinical benchmarks.", p: 90, delay: 1200 }
+                    { t: "Uploading dataset to AI Backend...", d: "Connecting to secure processing node.", p: 10, delay: 200 },
+                    { t: "Extracting Features...", d: "Analyzing frequency components and baseline wander.", p: 35, delay: 400 },
+                    { t: "Analyzing Noise Profile...", d: "Detecting 50/60 Hz power-line interference and muscle artifact bursts.", p: 65, delay: 400 },
+                    { t: "Generating Educational Recommendations...", d: "Comparing SNR and CMRR projections against educational benchmarks.", p: 90, delay: 400 }
                 ];
 
                 let currentDelay = 0;
@@ -1847,120 +2357,345 @@ $m = $modules[$page] ?? null;
                     currentDelay += step.delay;
                 });
 
-                if (isUploading) {
-                    const formData = new FormData();
+                const analyzeBtn = document.querySelector('button[onclick="runAiAnalysis()"]');
+                if(analyzeBtn) {
+                    analyzeBtn.disabled = true;
+                    analyzeBtn.innerHTML = '<span>⏳</span> Processing AI Data...';
+                }
+
+                const formData = new FormData();
+                if (isUploading && fileInput.files.length > 0) {
                     formData.append('dataset', fileInput.files[0]);
-                    
+                }
+                formData.append('appType', appType);
+                formData.append('electrode', aiState.electrode);
+                formData.append('noise', aiState.noise);
+
+                try {
+                    const response = await fetch('api.php', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    const textContent = await response.text();
                     try {
-                        const response = await fetch('api/upload_analysis_api.php', {
-                            method: 'POST',
-                            body: formData
-                        });
-                        const data = await response.json();
-                        aiState.apiData = data;
-                    } catch (e) {
-                        aiState.apiData = { status: 'error', error: e.message };
-                        console.error("AI Analysis failed:", e);
+                        aiState.apiData = JSON.parse(textContent);
+                    } catch(jsonErr) {
+                        console.error("Malformed AI JSON:", textContent);
+                        aiState.apiData = { status: 'error', message: "AI Backend returned invalid data." };
                     }
-                } else {
-                    aiState.apiData = null;
+                } catch (e) {
+                    aiState.apiData = { status: 'error', error: e.message };
+                    console.error("AI Analysis network failure:", e);
+                }
+
+                // Restore button
+                if(analyzeBtn) {
+                    analyzeBtn.disabled = false;
+                    analyzeBtn.innerHTML = '<span>⚡</span> Run AI Expert Analysis';
                 }
 
                 // Finish
                 setTimeout(() => {
                     showAiResults(appType);
-                }, currentDelay + 400);
+                }, currentDelay + 200);
             }
 
             function showAiResults(appType) {
+                // Hide progress, show results
                 document.getElementById('ai-progress-view').style.display = 'none';
                 document.getElementById('ai-results-view').style.display = 'block';
+                document.getElementById('ai-progress-bar').style.width = '100%';
 
-                const targetType = aiState.electrode; // Recommend what user selected
-                document.getElementById('ai-res-rec-title').innerText = "Recommended: " + targetType + " Recording";
-                document.getElementById('ai-res-rec-desc').innerText = `Based on your configuration (${aiState.appInfo}, ${aiState.noise} noise), ${targetType} recording is optimal for your application.`;
-                document.getElementById('ai-res-icon').innerText = targetType === 'Bipolar' ? '⚡' : '📡';
-                document.getElementById('ai-res-type').innerText = targetType;
-                
-                let conf = 90;
-                let actualSnr = null;
+                const electrode = aiState.electrode;
+                const noise = aiState.noise;
+                const isBipolar = electrode === 'Bipolar';
+
+                // --- Generate or use API data ---
+                let snrNum, confidence, noiseReduction, stability, spatialRes, amplitudes, cleanSignal;
 
                 if (aiState.apiData && aiState.apiData.status === 'success') {
-                    conf = Math.round(aiState.apiData.base_stability);
-                    actualSnr = aiState.apiData.actual_snr.toFixed(1) + ":1";
+                    // Real API response from the Python Backend Simulation Math / Real Analysis
+                    snrNum = aiState.apiData.actual_snr || 12;
+                    amplitudes = aiState.apiData.amplitudes || [];
+                    cleanSignal = aiState.apiData.clean_signal || amplitudes;
+                    confidence = aiState.apiData.confidence || 92;
+                    noiseReduction = aiState.apiData.noise_reduction || 60;
+                    stability = aiState.apiData.stability || 85;
+                    spatialRes = aiState.apiData.spatial_resolution || 78;
                 } else {
-                    let baseConf = aiState.isAutoFill ? 78 : 92;
-                    if (aiState.noise === 'High') { baseConf -= (aiState.isAutoFill ? 5 : 2); }
-                    if (targetType === 'Bipolar' && aiState.noise === 'High') { baseConf += 2; }
-                    conf = Math.max(60, Math.min(99, baseConf));
+                    // Fail-safe if API fails to hit Python
+                    snrNum = isBipolar ? 15 : 6;
+                    confidence = isBipolar ? 92 : 65;
+                    noiseReduction = isBipolar ? 60 : 25;
+                    stability = isBipolar ? 85 : 50;
+                    spatialRes = isBipolar ? 78 : 60;
+                    amplitudes = Array(300).fill(0).map(() => Math.random());
+                    cleanSignal = Array(300).fill(0).map(() => Math.random());
                 }
-                
-                document.getElementById('ai-res-confidence').innerText = conf + "%";
-                document.getElementById('ai-res-conf-bar').style.width = conf + "%";
-                document.getElementById('ai-res-source').innerText = aiState.isAutoFill ? "🤖 Based on simulated data" : "📊 Based on uploaded dataset";
 
-                // Generate metrics
+                const actualSnr = snrNum.toFixed ? snrNum.toFixed(1) + ':1' : snrNum + ':1';
+
+                // --- Populate Results UI ---
+                // Subtitle
+                document.getElementById('ai-res-subtitle').innerText =
+                    `${aiState.appInfo} • ${electrode} • ${noise} Noise • Ref: Bio-AI-${new Date().getFullYear()}`;
+
+                // Recommendation
+                const appIcons = { 'EEG': '🧠', 'ECG': '❤️', 'EMG': '💪', 'DBS': '⚡', 'Nerve': '🔬', 'Custom': '📊' };
+                document.getElementById('ai-res-icon').innerText = appIcons[appType] || '⚡';
+                document.getElementById('ai-res-rec-title').innerText = `Recommended: ${electrode}`;
+
+                const recDescs = {
+                    'EEG': isBipolar
+                        ? 'Bipolar montage provides superior artifact rejection for EEG, ideal for localizing epileptiform discharges and phase reversals.'
+                        : 'Monopolar (referential) EEG captures absolute scalp potentials, useful for amplitude mapping and broad spatial surveys.',
+                    'ECG': isBipolar
+                        ? 'Bipolar ECG leads (e.g., Lead I, II, III) provide clean cardiac waveforms with excellent CMRR for precise P-QRS-T morphology analysis.'
+                        : 'Monopolar (unipolar) ECG leads (aVR, aVL, aVF) capture absolute cardiac potentials for augmented limb lead analyticals.',
+                    'EMG': isBipolar
+                        ? 'Bipolar surface EMG with differential amplification rejects cross-talk from adjacent muscles, yielding focused motor unit data.'
+                        : 'Monopolar needle EMG captures absolute motor unit action potentials with higher amplitude for individual fiber analysis.',
+                    'DBS': isBipolar
+                        ? 'Bipolar DBS electrode configurations deliver focused stimulation with minimal current spread, reducing side effects.'
+                        : 'Monopolar DBS provides wider stimulation fields, useful for initial parameter optimization and larger target coverage.',
+                    'Nerve': isBipolar
+                        ? 'Bipolar nerve recording isolates compound action potentials with minimal far-field contamination for precise conduction studies.'
+                        : 'Monopolar nerve recording captures broader field potentials, useful for detecting distributed neural generators.',
+                    'Custom': isBipolar
+                        ? 'Bipolar recording provides superior noise rejection and precise signal localization for your custom dataset.'
+                        : 'Monopolar recording offers higher amplitude capture and broader spatial coverage for your custom dataset.'
+                };
+                document.getElementById('ai-res-rec-desc').innerText = recDescs[appType] || recDescs['Custom'];
+
+                document.getElementById('ai-res-confidence').innerText = confidence + '%';
+                document.getElementById('ai-res-conf-bar').style.width = confidence + '%';
+                document.getElementById('ai-res-source').innerText = aiState.isAutoFill
+                    ? '🤖 Based on auto-generated simulation dataset'
+                    : '📁 Based on uploaded dataset: ' + aiState.filename;
+                document.getElementById('ai-res-type').innerText = electrode;
+
+                // Metrics bars — application-aware labels
                 const barsContainer = document.getElementById('ai-res-bars');
-                barsContainer.innerHTML = '';
-                let metrics = [];
+                const freqBand = (aiState.apiData && aiState.apiData.freq_band) || 'N/A';
+                const ampRange = (aiState.apiData && aiState.apiData.amp_range) || 'N/A';
+                const sigLabel = (aiState.apiData && aiState.apiData.signal_label) || appType;
+                const metrics = [
+                    { label: 'Signal-to-Noise Ratio (SNR)', value: Math.min(100, snrNum * 5), display: actualSnr, color: '#8E24AA' },
+                    { label: 'Noise Reduction Efficiency', value: noiseReduction, display: noiseReduction + '%', color: '#22C55E' },
+                    { label: 'Signal Stability', value: stability, display: stability + '%', color: '#3B82F6' },
+                    { label: 'Spatial Resolution', value: spatialRes, display: spatialRes + '%', color: '#F59E0B' },
+                    { label: 'Freq. Band (' + sigLabel + ')', value: 100, display: freqBand, color: '#06B6D4' },
+                    { label: 'Amplitude Range', value: 100, display: ampRange, color: '#EC4899' }
+                ];
+                barsContainer.innerHTML = metrics.map(m => `
+                    <div>
+                        <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                            <span style="color:#E2E8F0; font-size:0.85rem;">${m.label}</span>
+                            <span style="color:${m.color}; font-weight:700; font-size:0.85rem;">${m.display}</span>
+                        </div>
+                        <div style="height:6px; background:rgba(255,255,255,0.08); border-radius:3px; overflow:hidden;">
+                            <div style="height:100%; width:${Math.min(100, m.value)}%; background:${m.color}; border-radius:3px; transition:width 1.2s ease-out;"></div>
+                        </div>
+                    </div>
+                `).join('');
 
-                if (targetType === 'Bipolar') {
-                    metrics = [
-                        { l: "Precision / Localized Capture", v: (appType==='ECG'?60:(appType==='EEG'?90:85)), t: "Excellent" },
-                        { l: "Environmental Noise Rejection (CMRR)", v: 95, t: "Superior" },
-                        { l: "Signal-to-Noise Ratio (SNR)", v: (appType==='EEG'?98:90), t: actualSnr ? `Actual: ${actualSnr}` : "Maximum" },
-                        { l: "Setup Complexity", v: 50, t: "Moderate" }
-                    ];
-                } else {
-                    metrics = [
-                        { l: "Signal Amplitude / Strength", v: (appType==='ECG'?90:95), t: "Very High" },
-                        { l: "Spatial Coverage / Broad Focus", v: 75, t: "Broad Coverage" },
-                        { l: "Signal-to-Noise Ratio (SNR)", v: 60, t: actualSnr ? `Actual: ${actualSnr}` : "Fair" },
-                        { l: "Ease of Application", v: 90, t: "Simple" }
-                    ];
-                }
+                // Application-specific advantages
+                const advantageMap = {
+                    'EEG': isBipolar
+                        ? ['Phase reversal detection for epileptic foci localization', 'Superior artifact rejection for long-term monitoring', 'Clean alpha/beta/theta band separation', `SNR of ${actualSnr} exceeds EEG analytical threshold`]
+                        : ['True amplitude mapping across scalp regions', 'Simpler montage setup for routine screening', 'Full voltage capture for qEEG analysis', 'Broader spatial coverage per channel'],
+                    'ECG': isBipolar
+                        ? ['Clean P-QRS-T morphology with minimal baseline wander', 'Power-line interference elimination via CMRR', 'High analytical accuracy for arrhythmia detection (~96%)', `SNR of ${actualSnr} exceeds cardiac monitoring threshold`]
+                        : ['Higher R-wave amplitude for reliable QRS detection', 'Augmented limb leads for frontal plane axis', 'Simpler 3-lead setup for continuous monitoring', 'Broader cardiac field coverage'],
+                    'EMG': isBipolar
+                        ? ['Cross-talk rejection from adjacent muscle groups', 'Precise motor unit action potential isolation', 'Ideal for conduction velocity studies', `SNR of ${actualSnr} supports educational EMG analysis`]
+                        : ['Higher MUAP amplitude for needle EMG', 'Individual motor unit fiber analysis', 'Broader muscle activity coverage', 'Cost-effective for screening studies'],
+                    'DBS': isBipolar
+                        ? ['Focused stimulation with minimal current spread', 'Reduced side effects from off-target activation', 'Precise therapeutic window control', `SNR of ${actualSnr} for stable stimulation delivery`]
+                        : ['Wider stimulation field for initial programming', 'Lower impedance for power efficiency', 'Broader neural target coverage', 'Simpler pulse generator configuration'],
+                    'Nerve': isBipolar
+                        ? ['Clean compound action potential isolation', 'Minimal far-field contamination', 'Precise conduction velocity measurement', `SNR of ${actualSnr} for reliable NCV calculations`]
+                        : ['Higher absolute nerve potential amplitude', 'Broader neural generator detection', 'Simpler electrode placement', 'Suitable for screening NCS protocols']
+                };
+                const advantages = advantageMap[appType] || (isBipolar
+                    ? ['Superior Common Mode Rejection (CMRR)', 'Clean waveforms with minimal baseline drift', 'High analytical accuracy', `SNR of ${actualSnr} exceeds educational threshold`]
+                    : ['Simpler electrode setup & application', 'Higher absolute signal amplitude', 'Broader spatial coverage', 'Cost-effective standard equipment']);
+                document.getElementById('ai-why-container').innerHTML = advantages.map(a =>
+                    `<div class="ai-list-item" style="display:flex; gap:8px; align-items:flex-start;">
+                        <span style="color:#22C55E; flex-shrink:0;">✓</span><span>${a}</span>
+                    </div>`
+                ).join('');
 
-                metrics.forEach(m => {
-                    barsContainer.innerHTML += `
-                        <div>
-                            <div style="display:flex; justify-content:space-between; margin-bottom:5px; font-size:0.85rem; color:#E2E8F0;">
-                                <span>${m.l}</span>
-                                <span style="font-weight:bold; color:#CE93D8;">${m.t}</span>
+                // Application-specific considerations
+                const consMap = {
+                    'EEG': isBipolar
+                        ? ['Reduced amplitude may miss low-voltage fast activity', 'End-of-chain electrodes lack differential pair', 'Requires precise 10-20 system placement', 'More complex interpretation for trainees']
+                        : ['Susceptible to eye blink and EMG artifacts', `Lower SNR (${actualSnr}) in ICU/OR environments`, 'Reference contamination can distort topography', 'Greater baseline drift during long recordings'],
+                    'ECG': isBipolar
+                        ? ['Lower R-wave amplitude than unipolar leads', 'Limited to specific lead pair combinations', 'Requires precise limb lead positioning', 'Cannot provide precordial (V1-V6) data alone']
+                        : ['Susceptible to 50/60Hz power-line interference', `Lower SNR (${actualSnr}) in ambulatory settings`, 'Motion artifacts during subject movement', 'Baseline wander during respiration'],
+                    'EMG': isBipolar
+                        ? ['Signal cancellation with closely spaced electrodes', 'Lower amplitude requires higher gain settings', 'Orientation-dependent signal capture', 'More complex electrode placement protocol']
+                        : ['Cross-talk from adjacent muscles', `Lower SNR (${actualSnr}) in dynamic assessments`, 'Susceptible to movement artifacts', 'Reduced spatial selectivity'],
+                    'DBS': isBipolar
+                        ? ['Smaller therapeutic window requires precise targeting', 'Higher impedance increases battery drain', 'Limited volume of tissue activated', 'More sensitive to lead migration']
+                        : ['Greater current spread may cause side effects', 'Higher stimulation thresholds possible', 'Less focal activation of target nucleus', 'More challenging parameter optimization'],
+                    'Nerve': isBipolar
+                        ? ['Short inter-electrode distance reduces amplitude', 'Precise placement along nerve path required', 'Temperature-sensitive conduction velocity', 'May miss slow C-fiber potentials']
+                        : ['Far-field contamination from volume conduction', `Lower SNR (${actualSnr}) may obscure small CMAPs`, 'Stimulus artifact overlap at short distances', 'Reference electrode position-dependent']
+                };
+                const considerations = consMap[appType] || (isBipolar
+                    ? ['Requires precise electrode placement', 'Lower absolute signal amplitude', 'Higher equipment cost', 'More complex setup protocol']
+                    : ['Susceptible to electromagnetic interference', `Lower SNR (${actualSnr}) in noisy environments`, 'Greater baseline drift & motion artifacts', 'Reduced spatial precision']);
+                document.getElementById('ai-cons-container').innerHTML = considerations.map(c =>
+                    `<div class="ai-list-item" style="display:flex; gap:8px; align-items:flex-start;">
+                        <span style="color:#F59E0B; flex-shrink:0;">⚠</span><span>${c}</span>
+                    </div>`
+                ).join('');
+
+                // Signal Quality Analysis section
+                const qualityDiv = document.getElementById('ai-quality-analysis');
+                if (qualityDiv) {
+                    const qualityLevel = snrNum > 15 ? 'Excellent' : (snrNum > 8 ? 'Good' : (snrNum > 4 ? 'Fair' : 'Poor'));
+                    const qualityColor = snrNum > 15 ? '#22C55E' : (snrNum > 8 ? '#3B82F6' : (snrNum > 4 ? '#F59E0B' : '#EF4444'));
+                    
+                    let conditionHtml = '';
+                    if (aiState.apiData && aiState.apiData.clinical_condition) {
+                        const conditionObj = aiState.apiData.clinical_condition;
+                        conditionHtml = `
+                            <div style="margin-top:15px; padding:20px; background:rgba(255,255,255,0.02); border-radius:14px; border:1px solid rgba(255,255,255,0.06); display:flex; align-items:center; gap:20px; border-left: 4px solid ${conditionObj.color};">
+                                <div style="width:16px; height:16px; border-radius:50%; background:${conditionObj.color}; box-shadow:0 0 12px ${conditionObj.color};"></div>
+                                <div>
+                                    <h4 style="color:#fff; margin:0 0 5px 0; font-size:1.1rem;">${conditionObj.title}</h4>
+                                    <p style="color:#94A3B8; margin:0; font-size:0.9rem;">${conditionObj.desc}</p>
+                                </div>
                             </div>
-                            <div style="height:6px; background:rgba(255,255,255,0.05); border-radius:3px; overflow:hidden;">
-                                <div style="height:100%; width:${m.v}%; background:linear-gradient(90deg, #CE93D8, #8E24AA); border-radius:3px;"></div>
+                        `;
+                    }
+
+                    let morphHtml = '';
+                    if (aiState.apiData && aiState.apiData.morphological_features) {
+                        const m = aiState.apiData.morphological_features;
+                        const features = [
+                            { label: 'MAV', value: m.mav, icon: '📏' },
+                            { label: 'RMS', value: m.rms, icon: '📶' },
+                            { label: 'Std Dev', value: m.std_dev, icon: '📉' },
+                            { label: 'Energy', value: m.energy, icon: '🧨' },
+                            { label: 'Peak-to-Peak', value: m.peak_to_peak, icon: '↕️' },
+                            { label: 'Zero Crossing', value: m.zcr, icon: '🔀' }
+                        ];
+                        morphHtml = `
+                            <div style="margin-top:20px;">
+                                <h4 style="color:#fff; font-size:0.9rem; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
+                                    <span style="color:#CE93D8;">🧬</span> Morphological Features
+                                </h4>
+                                <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:12px;">
+                                    ${features.map(f => `
+                                        <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.05); padding:12px; border-radius:10px; text-align:center;">
+                                            <div style="font-size:0.65rem; color:#94A3B8; text-transform:uppercase; margin-bottom:4px;">${f.icon} ${f.label}</div>
+                                            <div style="font-size:1rem; font-weight:700; color:#fff;">${f.value}</div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    qualityDiv.innerHTML = `
+                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:15px; margin-top:15px;">
+                            <div style="text-align:center; padding:20px; background:rgba(255,255,255,0.02); border-radius:14px; border:1px solid rgba(255,255,255,0.06);">
+                                <div style="font-size:0.7rem; color:#94A3B8; text-transform:uppercase; font-weight:700; letter-spacing:1px; margin-bottom:8px;">Quality</div>
+                                <div style="font-size:1.4rem; font-weight:800; color:${qualityColor};">${qualityLevel}</div>
+                            </div>
+                            <div style="text-align:center; padding:20px; background:rgba(255,255,255,0.02); border-radius:14px; border:1px solid rgba(255,255,255,0.06);">
+                                <div style="font-size:0.7rem; color:#94A3B8; text-transform:uppercase; font-weight:700; letter-spacing:1px; margin-bottom:8px;">SNR</div>
+                                <div style="font-size:1.4rem; font-weight:800; color:#CE93D8;">${actualSnr}</div>
+                            </div>
+                            <div style="text-align:center; padding:20px; background:rgba(255,255,255,0.02); border-radius:14px; border:1px solid rgba(255,255,255,0.06);">
+                                <div style="font-size:0.7rem; color:#94A3B8; text-transform:uppercase; font-weight:700; letter-spacing:1px; margin-bottom:8px;">Technique</div>
+                                <div style="font-size:1.4rem; font-weight:800; color:#fff;">${electrode}</div>
                             </div>
                         </div>
+                        ${conditionHtml}
+                        ${morphHtml}
                     `;
-                });
+                }
 
-                // Generate Why & Cons
-                const whyCon = document.getElementById('ai-why-container');
-                whyCon.innerHTML = '';
-                const whyList = targetType === 'Bipolar' ? [
-                    "Superior common-mode noise rejection",
-                    "Reduces powerline and ambient interference",
-                    "Highly localized signal capture"
-                ] : [
-                    "Optimal for standard clinical derivations",
-                    "Maximum signal amplitude retention",
-                    "Easier setup for multi-channel arrays"
-                ];
-                whyList.forEach(w => whyCon.innerHTML += `<div class="ai-list-item">✓ ${w}</div>`);
+                // Fidelity card
+                const fidelityCard = document.getElementById('ai-fidelity-card');
+                if (fidelityCard) {
+                    fidelityCard.style.display = 'flex';
+                    let fScore = Math.round(Math.min(99, snrNum * 5));
+                    if (snrNum > 15) fScore = Math.round(85 + (snrNum / 30) * 14);
+                    document.getElementById('ai-fidelity-score-bubble').innerText = fScore;
+                    document.getElementById('ai-fidelity-desc').innerText =
+                        snrNum < 5 ? 'Low-quality signal detected. Consider adjusting parameters.' :
+                        snrNum < 15 ? 'Moderate signal fidelity. Acceptable for general analyticals.' :
+                        'High-quality differential signal detected. SNR is within optimal analytical parameters.';
+                }
 
-                const consCon = document.getElementById('ai-cons-container');
-                consCon.innerHTML = '';
-                const consList = targetType === 'Bipolar' ? [
-                    "Requires precise inter-electrode distance",
-                    "Slightly higher setup complexity (3 leads)",
-                    "Lower absolute amplitude than monopolar"
-                ] : [
-                    "Reference electrode placement is critical",
-                    "Highly susceptible to common-mode noise / EMI",
-                    "May pick up distant electrical activity (crosstalk)"
-                ];
-                consList.forEach(c => consCon.innerHTML += `<div class="ai-list-item warn">⚠️ ${c}</div>`);
+                // Draw signal on canvas (Animated!)
+                const graphContainer = document.getElementById('ai-graph-container');
+                if (graphContainer && amplitudes.length > 0) {
+                    graphContainer.style.display = 'block';
+                    const canvas = document.getElementById('aiSignalCanvas');
+                    if (canvas) {
+                        const ctx = canvas.getContext('2d');
+                        let offset = 0;
+                        function animateAiSignal() {
+                            if (document.getElementById('ai-results-view').style.display === 'none') return;
+                            ctx.clearRect(0, 0, canvas.width, canvas.height);
+                            
+                            const step = canvas.width / 150;
+                            const min = Math.min(...amplitudes);
+                            const max = Math.max(...amplitudes);
+                            const range = (max - min) || 1;
+
+                            // Draw Clean Trace
+                            ctx.beginPath();
+                            ctx.strokeStyle = isBipolar ? '#8E24AA' : '#F59E0B';
+                            ctx.lineWidth = 2;
+                            for (let i = 0; i < 150; i++) {
+                                const idx = (i + offset) % cleanSignal.length;
+                                const x = i * step;
+                                const y = canvas.height - ((cleanSignal[idx] - min) / range) * (canvas.height - 40) - 20;
+                                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+                            }
+                            ctx.stroke();
+
+                            // Draw Raw/Noisy Overlay
+                            ctx.beginPath();
+                            ctx.strokeStyle = 'rgba(239,68,68,0.2)';
+                            ctx.lineWidth = 1;
+                            for (let i = 0; i < 150; i++) {
+                                const idx = (i + offset) % amplitudes.length;
+                                const x = i * step;
+                                const y = canvas.height - ((amplitudes[idx] - min) / range) * (canvas.height - 40) - 20;
+                                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+                            }
+                            ctx.stroke();
+
+                            offset = (offset + 1) % cleanSignal.length;
+                            requestAnimationFrame(animateAiSignal);
+                        }
+                        animateAiSignal();
+                    }
+                }
+
+                // SAVE to local storage for persistence across page reloads
+                localStorage.setItem('last_ai_analysis', JSON.stringify({
+                    apiData: aiState.apiData,
+                    electrode: aiState.electrode,
+                    noise: aiState.noise,
+                    appInfo: aiState.appInfo,
+                    actualSnr: actualSnr
+                }));
+
+                // Update Signal Quality page elements
+                syncSignalQualityData();
             }
+
+
 
             function resetAiSystem() {
                 document.getElementById('ai-results-view').style.display = 'none';
@@ -1976,6 +2711,8 @@ $m = $modules[$page] ?? null;
                 if(document.getElementById('aiAppSelector')) {
                     autoFillDataset();
                 }
+                // SYNC Signal Quality page data if user just navigated here
+                syncSignalQualityData();
             });
         </script>
 
@@ -2161,14 +2898,14 @@ $m = $modules[$page] ?? null;
             <div style="display:grid; gap:12px;">
                 <div style="background:rgba(15,23,42,0.8); border-radius:14px; padding:16px; border:1px solid rgba(255,255,255,0.06);">
                     <div style="font-weight:700; color:#fff; font-size:0.9rem; margin-bottom:8px;">ECG Guide: Sinus Rhythm</div>
-                    <div style="background:rgba(46,125,50,0.15); color:#81C784; font-size:0.75rem; padding:8px 12px; border-radius:8px; margin-bottom:8px;">Features Heart Rhythm Guide, ECG waveform analysis, clinical interpretation</div>
+                    <div style="background:rgba(46,125,50,0.15); color:#81C784; font-size:0.75rem; padding:8px 12px; border-radius:8px; margin-bottom:8px;">Features Heart Rhythm Guide, ECG waveform analysis, educational interpretation</div>
                     <div style="color:#64748B; font-size:0.75rem;">Normal heart rhythm at 60 BPM with standard PQRST morphology and sinus node origin</div>
                 </div>
 
                 <div style="background:rgba(15,23,42,0.8); border-radius:14px; padding:16px; border:1px solid rgba(255,255,255,0.06);">
                     <div style="font-weight:700; color:#fff; font-size:0.9rem; margin-bottom:8px;">DART Sim Pro – Medical Simulator</div>
-                    <div style="background:rgba(0,105,92,0.15); color:#4DB6AC; font-size:0.75rem; padding:8px 12px; border-radius:8px; margin-bottom:8px;">Features 12-lead ECG, BP, SpO₂, drug interactions, multi-patient scenarios</div>
-                    <div style="color:#64748B; font-size:0.75rem;">Professional-grade simulator for clinical training and emergency medicine practice</div>
+                    <div style="background:rgba(0,105,92,0.15); color:#4DB6AC; font-size:0.75rem; padding:8px 12px; border-radius:8px; margin-bottom:8px;">Features 12-lead ECG, BP, SpO₂, drug interactions, multi-subject scenarios</div>
+                    <div style="color:#64748B; font-size:0.75rem;">Professional-grade simulator for educational training and emergency medicine practice</div>
                 </div>
 
                 <div style="background:rgba(15,23,42,0.8); border-radius:14px; padding:16px; border:1px solid rgba(255,255,255,0.06);">
@@ -2184,7 +2921,7 @@ $m = $modules[$page] ?? null;
             <div style="font-size:1.3rem; flex-shrink:0;">💡</div>
             <div>
                 <div style="font-weight:800; color:#1565C0; font-size:0.85rem; margin-bottom:4px;">Learning Tip</div>
-                <div id="learningTip" style="color:#1976D2; font-size:0.85rem; line-height:1.5;">These core simulation principles show how bipolar and monopolar recordings are applied in clinical settings.</div>
+                <div id="learningTip" style="color:#1976D2; font-size:0.85rem; line-height:1.5;">These core simulation principles show how bipolar and monopolar recordings are applied in educational settings.</div>
             </div>
         </div>
 
@@ -2446,14 +3183,14 @@ $m = $modules[$page] ?? null;
                     } else {
                         el.textContent = '⚠️ High noise detected but bipolar CMRR is helping significantly. Lower noise source or increase inter-electrode distance.';
                     }
-                    tip.textContent = 'These core simulation principles show how bipolar recordings are applied in clinical settings with superior noise rejection.';
+                    tip.textContent = 'These core simulation principles show how bipolar recordings are applied in educational settings with superior noise rejection.';
                 } else {
                     if (noise < 30) {
                         el.textContent = 'Monopolar recording in quiet conditions. Amplitude is higher than bipolar. Suitable for controlled lab environments.';
                     } else {
                         el.textContent = '⚠️ Challenging conditions! High noise significantly affects monopolar recording. Consider switching to bipolar for better noise rejection.';
                     }
-                    tip.textContent = 'Please note that in most clinical setups, monopolar recordings are susceptible to environmental noise. Use in shielded environments.';
+                    tip.textContent = 'Please note that in most educational setups, monopolar recordings are susceptible to environmental noise. Use in shielded environments.';
                 }
             }
 
@@ -2539,17 +3276,17 @@ $m = $modules[$page] ?? null;
 
                     <div style="margin-bottom:25px;">
                         <h4 style="color:#10B981; font-size:1rem; margin-bottom:12px; display:flex; align-items:center; gap:8px;">✅ Advantages</h4>
-                        <div class="clinical-item"><div class="clinical-dot" style="background:#10B981;"></div><strong>Superior Noise Rejection:</strong> CMRR eliminates ambient noise.</div>
-                        <div class="clinical-item"><div class="clinical-dot" style="background:#10B981;"></div><strong>High Resolution:</strong> Precise activity localization.</div>
-                        <div class="clinical-item"><div class="clinical-dot" style="background:#10B981;"></div><strong>Cleaner Waveforms:</strong> Minimal baseline drift.</div>
-                        <div class="clinical-item"><div class="clinical-dot" style="background:#10B981;"></div><strong>Accuracy:</strong> ~94% diagnostic success rate.</div>
+                        <div class="educational-item"><div class="educational-dot" style="background:#10B981;"></div><strong>Superior Noise Rejection:</strong> CMRR eliminates ambient noise.</div>
+                        <div class="educational-item"><div class="educational-dot" style="background:#10B981;"></div><strong>High Resolution:</strong> Precise activity localization.</div>
+                        <div class="educational-item"><div class="educational-dot" style="background:#10B981;"></div><strong>Cleaner Waveforms:</strong> Minimal baseline drift.</div>
+                        <div class="educational-item"><div class="educational-dot" style="background:#10B981;"></div><strong>Accuracy:</strong> ~94% analytical success rate.</div>
                     </div>
 
                     <div>
                         <h4 style="color:#EF4444; font-size:1rem; margin-bottom:12px; display:flex; align-items:center; gap:8px;">❌ Disadvantages</h4>
-                        <div class="clinical-item" style="opacity:0.8;"><div class="clinical-dot" style="background:#EF4444;"></div>Complex setup & precise placement required.</div>
-                        <div class="clinical-item" style="opacity:0.8;"><div class="clinical-dot" style="background:#EF4444;"></div>Lower signal amplitude (differential).</div>
-                        <div class="clinical-item" style="opacity:0.8;"><div class="clinical-dot" style="background:#EF4444;"></div>Higher equipment & training costs.</div>
+                        <div class="educational-item" style="opacity:0.8;"><div class="educational-dot" style="background:#EF4444;"></div>Complex setup & precise placement required.</div>
+                        <div class="educational-item" style="opacity:0.8;"><div class="educational-dot" style="background:#EF4444;"></div>Lower signal amplitude (differential).</div>
+                        <div class="educational-item" style="opacity:0.8;"><div class="educational-dot" style="background:#EF4444;"></div>Higher equipment & training costs.</div>
                     </div>
                 </div>
 
@@ -2569,17 +3306,17 @@ $m = $modules[$page] ?? null;
 
                     <div style="margin-bottom:25px;">
                         <h4 style="color:#10B981; font-size:1rem; margin-bottom:12px; display:flex; align-items:center; gap:8px;">✅ Advantages</h4>
-                        <div class="clinical-item"><div class="clinical-dot" style="background:#10B981;"></div><strong>Simple Setup:</strong> Fast application with one active.</div>
-                        <div class="clinical-item"><div class="clinical-dot" style="background:#10B981;"></div><strong>High Amplitude:</strong> Full absolute potential capture.</div>
-                        <div class="clinical-item"><div class="clinical-dot" style="background:#10B981;"></div><strong>Broad Coverage:</strong> Comprehensive spatial capture.</div>
-                        <div class="clinical-item"><div class="clinical-dot" style="background:#10B981;"></div><strong>Cost Effective:</strong> Affordable standard equipment.</div>
+                        <div class="educational-item"><div class="educational-dot" style="background:#10B981;"></div><strong>Simple Setup:</strong> Fast application with one active.</div>
+                        <div class="educational-item"><div class="educational-dot" style="background:#10B981;"></div><strong>High Amplitude:</strong> Full absolute potential capture.</div>
+                        <div class="educational-item"><div class="educational-dot" style="background:#10B981;"></div><strong>Broad Coverage:</strong> Comprehensive spatial capture.</div>
+                        <div class="educational-item"><div class="educational-dot" style="background:#10B981;"></div><strong>Cost Effective:</strong> Affordable standard equipment.</div>
                     </div>
 
                     <div>
                         <h4 style="color:#EF4444; font-size:1rem; margin-bottom:12px; display:flex; align-items:center; gap:8px;">❌ Disadvantages</h4>
-                        <div class="clinical-item" style="opacity:0.8;"><div class="clinical-dot" style="background:#EF4444;"></div>Poor noise rejection (susceptible to EMI).</div>
-                        <div class="clinical-item" style="opacity:0.8;"><div class="clinical-dot" style="background:#EF4444;"></div>Lower accuracy (~78%) in noisy settings.</div>
-                        <div class="clinical-item" style="opacity:0.8;"><div class="clinical-dot" style="background:#EF4444;"></div>Artifact heavy (motion & eye blinks).</div>
+                        <div class="educational-item" style="opacity:0.8;"><div class="educational-dot" style="background:#EF4444;"></div>Poor noise rejection (susceptible to EMI).</div>
+                        <div class="educational-item" style="opacity:0.8;"><div class="educational-dot" style="background:#EF4444;"></div>Lower accuracy (~78%) in noisy settings.</div>
+                        <div class="educational-item" style="opacity:0.8;"><div class="educational-dot" style="background:#EF4444;"></div>Artifact heavy (motion & eye blinks).</div>
                     </div>
                 </div>
             </div>
@@ -2645,7 +3382,7 @@ $m = $modules[$page] ?? null;
                     <button class="option-btn" onclick="selectOption(2, 'precision', this)">
                         <div style="text-align:left;">
                             <div style="font-weight:700;">Precision & Accuracy</div>
-                            <div style="font-size:0.8rem; opacity:0.7;">Exact localization is critical for diagnosis.</div>
+                            <div style="font-size:0.8rem; opacity:0.7;">Exact localization is critical for analysis.</div>
                         </div>
                     </button>
                     <button class="option-btn" onclick="selectOption(2, 'speed', this)">
@@ -2697,7 +3434,7 @@ $m = $modules[$page] ?? null;
                     <button class="option-btn" onclick="selectOption(4, 'basic', this)">
                         <div style="text-align:left;">
                             <div style="font-weight:700;">Basic / General</div>
-                            <div style="font-size:0.8rem; opacity:0.7;">Standard clinical training.</div>
+                            <div style="font-size:0.8rem; opacity:0.7;">Standard educational training.</div>
                         </div>
                     </button>
                 </div>
@@ -2749,7 +3486,7 @@ $m = $modules[$page] ?? null;
                             nextCard.style.animation = 'fadeInUp 0.6s ease forwards';
                             nextCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
                         }
-                    }, 300);
+                    }, 150);
                 } else {
                     generateRecommendation();
                 }
@@ -2766,10 +3503,10 @@ $m = $modules[$page] ?? null;
                 
                 // Simple logic for Bipolar vs Monopolar
                 if (selections[1] === 'noisy' || selections[2] === 'precision' || selections[4] === 'advanced') {
-                    recommendation = "BIPOLAR RECORDING is highly recommended for your specific application. Its differential configuration provides superior noise rejection and focal precision needed for diagnostic accuracy.";
+                    recommendation = "BIPOLAR RECORDING is highly recommended for your specific application. Its differential configuration provides superior noise rejection and focal precision needed for analytical accuracy.";
                     icon = "🧬";
                 } else {
-                    recommendation = "MONOPOLAR RECORDING is suitable for your requirements. It offers a simpler setup and broader coverage, perfect for standard clinical screenings in controlled environments.";
+                    recommendation = "MONOPOLAR RECORDING is suitable for your requirements. It offers a simpler setup and broader coverage, perfect for standard educational screenings in controlled environments.";
                     icon = "📡";
                 }
                 
@@ -2815,14 +3552,30 @@ $m = $modules[$page] ?? null;
         </div>
 
         <div style="max-width:900px;">
-            <!-- Quality score card -->
-            <div style="background:linear-gradient(135deg, #10B981, #059669); padding:25px; border-radius:24px; margin-bottom:30px; display:flex; align-items:center; gap:20px; box-shadow:0 15px 35px rgba(16,185,129,0.3);">
-                <div style="width:70px; height:70px; border:4px solid rgba(255,255,255,0.3); border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:1.5rem; color:#fff;">92</div>
+            <!-- Application Type Badge (dynamic) -->
+            <div id="sq-app-badge" style="display:none; margin-bottom:20px; padding:14px 24px; border-radius:16px; background:linear-gradient(135deg, rgba(142,36,170,0.15), rgba(124,58,237,0.1)); border:1px solid rgba(142,36,170,0.3); display:flex; align-items:center; gap:14px;">
+                <span id="sq-app-icon" style="font-size:1.8rem;">🧠</span>
                 <div>
-                    <h4 style="color:#fff; margin:0 0 5px 0;">Signal Fidelity Score</h4>
-                    <p style="color:rgba(255,255,255,0.9); font-size:0.9rem; margin:0;">High-quality differential signal detected. SNR is within optimal diagnostic parameters.</p>
+                    <div style="color:#CE93D8; font-size:0.7rem; text-transform:uppercase; font-weight:800; letter-spacing:1px;">Active Analysis Dataset</div>
+                    <div id="sq-app-label" style="color:#fff; font-weight:700; font-size:1.05rem;">EEG (Brain Waves)</div>
+                </div>
+                <div style="margin-left:auto; display:flex; gap:10px;">
+                    <span id="sq-mode-badge" style="padding:4px 12px; border-radius:10px; font-size:0.7rem; font-weight:800; background:rgba(59,130,246,0.2); color:#60A5FA; border:1px solid rgba(59,130,246,0.3);">Bipolar</span>
+                    <span id="sq-noise-badge" style="padding:4px 12px; border-radius:10px; font-size:0.7rem; font-weight:800; background:rgba(245,158,11,0.2); color:#FCD34D; border:1px solid rgba(245,158,11,0.3);">Medium Noise</span>
                 </div>
             </div>
+
+            <!-- Quality score card -->
+            <div style="background:linear-gradient(135deg, #10B981, #059669); padding:25px; border-radius:24px; margin-bottom:20px; display:flex; align-items:center; gap:20px; box-shadow:0 15px 35px rgba(16,185,129,0.3);">
+                <div id="fidelity-score" style="width:70px; height:70px; border:4px solid rgba(255,255,255,0.3); border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:1.5rem; color:#fff;">92</div>
+                <div>
+                    <h4 style="color:#fff; margin:0 0 5px 0;">Signal Fidelity Score</h4>
+                    <p id="fidelity-desc" style="color:rgba(255,255,255,0.9); font-size:0.9rem; margin:0;">High-quality differential signal detected. SNR is within optimal analytical parameters.</p>
+                </div>
+            </div>
+
+            <!-- Clinical Condition Placeholder -->
+            <div id="sq-clinical-condition-container" style="display:none; margin-bottom:30px;"></div>
 
             <!-- Signal Comparison Grid -->
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:30px;">
@@ -2834,24 +3587,22 @@ $m = $modules[$page] ?? null;
                     </div>
                     
                     <div style="height:120px; background:#0D1224; border-radius:15px; border:1px solid rgba(59,130,246,0.2); margin-bottom:20px; display:flex; align-items:center; justify-content:center; position:relative; overflow:hidden;">
-                        <svg width="100%" height="100%" viewBox="0 0 200 60" preserveAspectRatio="none">
-                            <path d="M0,30 Q10,10 20,30 T40,30 T60,30 T80,30 T100,30 T120,30 T140,30 T160,30 T180,30 T200,30" stroke="#3B82F6" stroke-width="2" fill="none" />
-                        </svg>
-                        <div style="position:absolute; bottom:10px; right:10px; font-size:0.6rem; color:#3B82F6; font-weight:700; text-transform:uppercase;">Clean Trace</div>
+                        <canvas id="bipolarCanvas" width="400" height="100" style="width:100%; height:100%;"></canvas>
+                        <div id="bipolar-trace-label" style="position:absolute; bottom:10px; right:10px; font-size:0.6rem; color:#3B82F6; font-weight:700; text-transform:uppercase;">Clean Trace</div>
                     </div>
 
                     <div style="display:grid; gap:10px;">
                         <div style="display:flex; justify-content:space-between; font-size:0.85rem;">
                             <span style="color:#94A3B8;">Amplitude</span>
-                            <span style="color:#fff; font-weight:700;">50 μV</span>
+                            <span style="color:#fff; font-weight:700;" id="bipolar-amp">50 μV</span>
                         </div>
                         <div style="display:flex; justify-content:space-between; font-size:0.85rem;">
                             <span style="color:#94A3B8;">Noise Level</span>
-                            <span style="color:#10B981; font-weight:700;">Low (5 μV)</span>
+                            <span style="color:#10B981; font-weight:700;" id="bipolar-noise">Low (5 μV)</span>
                         </div>
                         <div style="display:flex; justify-content:space-between; font-size:0.85rem;">
                             <span style="color:#94A3B8;">SNR</span>
-                            <span style="color:#3B82F6; font-weight:700;">10:1</span>
+                            <span style="color:#3B82F6; font-weight:700;" id="bipolar-snr">10:1</span>
                         </div>
                     </div>
                 </div>
@@ -2864,25 +3615,22 @@ $m = $modules[$page] ?? null;
                     </div>
 
                     <div style="height:120px; background:#0D1224; border-radius:15px; border:1px solid rgba(245,158,11,0.2); margin-bottom:20px; display:flex; align-items:center; justify-content:center; position:relative; overflow:hidden;">
-                        <svg width="100%" height="100%" viewBox="0 0 200 60" preserveAspectRatio="none">
-                            <path d="M0,30 L10,20 L20,40 L30,10 L40,50 L50,20 L60,40 L70,30 L80,50 L90,10 L100,40 L110,25 L120,45 L130,20 L140,40 L150,20 L160,45 L170,10 L180,40 L190,30 L200,30" stroke="#F59E0B" stroke-width="1.5" fill="none" style="opacity:0.5" />
-                            <path d="M0,30 Q20,20 40,30 T80,30 T120,30 T160,30 T200,30" stroke="#F59E0B" stroke-width="2.5" fill="none" />
-                        </svg>
-                        <div style="position:absolute; bottom:10px; right:10px; font-size:0.6rem; color:#F59E0B; font-weight:700; text-transform:uppercase;">Artifact Heavy</div>
+                        <canvas id="monopolarCanvas" width="400" height="100" style="width:100%; height:100%;"></canvas>
+                        <div id="monopolar-trace-label" style="position:absolute; bottom:10px; right:10px; font-size:0.6rem; color:#F59E0B; font-weight:700; text-transform:uppercase;">Artifact Heavy</div>
                     </div>
 
                     <div style="display:grid; gap:10px;">
                         <div style="display:flex; justify-content:space-between; font-size:0.85rem;">
                             <span style="color:#94A3B8;">Amplitude</span>
-                            <span style="color:#fff; font-weight:700;">120 μV</span>
+                            <span style="color:#fff; font-weight:700;" id="monopolar-amp">120 μV</span>
                         </div>
                         <div style="display:flex; justify-content:space-between; font-size:0.85rem;">
                             <span style="color:#94A3B8;">Noise Level</span>
-                            <span style="color:#F59E0B; font-weight:700;">Higher (20 μV)</span>
+                            <span style="color:#F59E0B; font-weight:700;" id="monopolar-noise">Higher (20 μV)</span>
                         </div>
                         <div style="display:flex; justify-content:space-between; font-size:0.85rem;">
                             <span style="color:#94A3B8;">SNR</span>
-                            <span style="color:#3B82F6; font-weight:700;">6:1</span>
+                            <span style="color:#3B82F6; font-weight:700;" id="monopolar-snr">6:1</span>
                         </div>
                     </div>
                 </div>
@@ -2895,30 +3643,43 @@ $m = $modules[$page] ?? null;
                 <div style="margin-bottom:20px;">
                     <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
                         <span style="color:#fff; font-size:0.9rem; font-weight:600;">Bipolar Clarity (Noise-Free)</span>
-                        <span style="color:#10B981; font-weight:800;">92%</span>
+                        <span id="bipolar-clarity-val" style="color:#10B981; font-weight:800;">92%</span>
                     </div>
                     <div style="height:8px; background:rgba(255,255,255,0.05); border-radius:10px; overflow:hidden;">
-                        <div style="width:92%; height:100%; background:linear-gradient(90deg, #3B82F6, #10B981); border-radius:10px;"></div>
+                        <div id="bipolar-clarity-bar" style="width:92%; height:100%; background:linear-gradient(90deg, #3B82F6, #10B981); border-radius:10px; transition: width 1s ease-out;"></div>
                     </div>
                 </div>
 
                 <div style="margin-bottom:10px;">
                     <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
                         <span style="color:#fff; font-size:0.9rem; font-weight:600;">Monopolar Clarity (Noise-Free)</span>
-                        <span style="color:#F59E0B; font-weight:800;">68%</span>
+                        <span id="monopolar-clarity-val" style="color:#F59E0B; font-weight:800;">68%</span>
                     </div>
                     <div style="height:8px; background:rgba(255,255,255,0.05); border-radius:10px; overflow:hidden;">
-                        <div style="width:68%; height:100%; background:linear-gradient(90deg, #F59E0B, #D97706); border-radius:10px;"></div>
+                        <div id="monopolar-clarity-bar" style="width:68%; height:100%; background:linear-gradient(90deg, #F59E0B, #EF4444); border-radius:10px; transition: width 1s ease-out;"></div>
                     </div>
                 </div>
             </div>
 
             <!-- AI Insights -->
-            <div style="margin-top:30px; background:linear-gradient(135deg, rgba(124,58,237,0.15), rgba(79,70,229,0.15)); border-radius:24px; padding:30px; border:1px solid rgba(124,58,237,0.2); display:flex; gap:25px; align-items:center;">
+            <div id="sq-ai-insights" style="margin-top:30px; background:linear-gradient(135deg, rgba(124,58,237,0.15), rgba(79,70,229,0.15)); border-radius:24px; padding:30px; border:1px solid rgba(124,58,237,0.2); display:flex; gap:25px; align-items:center;">
                 <div style="font-size:3rem;">🧠</div>
-                <div>
-                    <h3 style="color:#fff; margin:0 0 10px 0;">AI Signal Analysis</h3>
-                    <p style="color:#C4B5FD; line-height:1.6; margin:0;">Bipolar recordings show superior Common Mode Rejection (CMRR), making them the gold standard for precision diagnostics in EMI-susceptible environments like intensive care units.</p>
+                <div style="flex:1;">
+                    <h3 id="sq-insight-title" style="color:#fff; margin:0 0 10px 0;">AI Signal Analysis</h3>
+                    <p id="sq-insight-text" style="color:#C4B5FD; line-height:1.6; margin:0;">Bipolar recordings show superior Common Mode Rejection (CMRR), making them the gold standard for precision analyticals in EMI-susceptible environments like intensive care units.</p>
+                </div>
+            </div>
+
+            <!-- NEW: Morphological Features on Quality Page -->
+            <div id="sq-morph-container" style="display:none; margin-top:20px; animation: slideUp 0.6s ease-out;">
+                <div class="detail-card" style="background:rgba(255,255,255,0.02); border:1px solid rgba(142,36,170,0.2);">
+                    <div class="panel-title" style="color:#CE93D8; margin-bottom:20px;"><span>🧬</span> Expert Morphological Features</div>
+                    <div id="sq-morph-grid" style="display:grid; grid-template-columns:repeat(3, 1fr); gap:15px;">
+                        <!-- Injected by JS -->
+                    </div>
+                    <div style="margin-top:20px; padding:15px; background:rgba(142,36,170,0.05); border-radius:12px; border:1px solid rgba(142,36,170,0.1); font-size:0.85rem; color:#CE93D8; text-align:center;">
+                        Analytical features extracted using BioElectrode Heuristic PHP Engine v2.0
+                    </div>
                 </div>
             </div>
 
@@ -2928,6 +3689,296 @@ $m = $modules[$page] ?? null;
                 </a>
             </div>
         </div>
+
+        <script>
+        // ═══ DATASET-DRIVEN SIGNAL QUALITY PAGE ═══
+        (function() {
+            const bpCanvas = document.getElementById('bipolarCanvas');
+            const mpCanvas = document.getElementById('monopolarCanvas');
+            if (!bpCanvas || !mpCanvas) return;
+
+            // ── Read AI Analysis data from localStorage ──
+            const saved = localStorage.getItem('last_ai_analysis');
+            let aiData = null;
+            let appType = 'ECG'; // default
+            let electrode = 'Bipolar';
+            let noiseLevel = 'Medium';
+            let snrNum = 10;
+
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    aiData = parsed.apiData || null;
+                    electrode = parsed.electrode || 'Bipolar';
+                    noiseLevel = parsed.noise || 'Medium';
+                    if (aiData) {
+                        appType = aiData.app_type || 'ECG';
+                        snrNum = aiData.actual_snr || 10;
+                    }
+                } catch(e) { /* ignore parse errors */ }
+            }
+
+            // ── Update Application Badge ──
+            const appIcons = { 'EEG':'🧠', 'ECG':'❤️', 'EMG':'💪', 'DBS':'⚡', 'Nerve':'🔬', 'Custom':'📊' };
+            const appLabels = { 'EEG':'EEG (Brain Waves)', 'ECG':'ECG (Heart Rhythm)', 'EMG':'EMG (Muscle Activity)', 'DBS':'Deep Brain Stimulation', 'Nerve':'Nerve Conduction', 'Custom':'Custom User Study' };
+            const badge = document.getElementById('sq-app-badge');
+            if (saved && badge) {
+                badge.style.display = 'flex';
+                document.getElementById('sq-app-icon').innerText = appIcons[appType] || '📊';
+                document.getElementById('sq-app-label').innerText = appLabels[appType] || appType;
+                document.getElementById('sq-mode-badge').innerText = electrode;
+                document.getElementById('sq-noise-badge').innerText = noiseLevel + ' Noise';
+            }
+
+            // ── Update Fidelity Score ──
+            const fs = document.getElementById('fidelity-score');
+            const fd = document.getElementById('fidelity-desc');
+            if (aiData && fs && fd) {
+                let fScore = Math.round(Math.min(99, snrNum * 5));
+                if (snrNum > 15) fScore = Math.round(85 + (snrNum / 30) * 14);
+                fs.innerText = fScore;
+
+                const fidelityDescs = {
+                    'EEG': snrNum > 12 ? 'High-quality EEG signal. Alpha/beta band separation is clean with minimal artifact contamination.' : (snrNum > 6 ? 'Moderate EEG fidelity. Some EMG artifact present; consider re-referencing.' : 'Low EEG quality. Significant artifact contamination detected.'),
+                    'ECG': snrNum > 15 ? 'Excellent cardiac signal. P-QRS-T morphology is clear with optimal analytical quality.' : (snrNum > 8 ? 'Good ECG fidelity. Minor baseline wander detected; acceptable for monitoring.' : 'Poor ECG quality. Motion artifacts and power-line interference present.'),
+                    'EMG': snrNum > 10 ? 'Strong EMG signal. Motor unit action potentials are well-defined for educational analysis.' : (snrNum > 5 ? 'Moderate EMG fidelity. Some cross-talk present from adjacent muscles.' : 'Weak EMG signal. Increase gain or reposition electrodes.'),
+                    'DBS': snrNum > 15 ? 'Stable DBS stimulation. Pulse delivery is consistent with minimal impedance variation.' : (snrNum > 8 ? 'Acceptable DBS signal. Minor local field potential drift detected.' : 'Unstable DBS signal. Check electrode impedance and connections.'),
+                    'Nerve': snrNum > 12 ? 'Strong nerve conduction signal. Compound action potentials are clearly resolved.' : (snrNum > 5 ? 'Moderate NCS fidelity. A-beta fiber responses may be attenuated.' : 'Weak NCS signal. Increase stimulation intensity or reposition electrodes.')
+                };
+                fd.innerText = fidelityDescs[appType] || (snrNum > 15 ? 'High-quality differential signal detected. SNR is within optimal analytical parameters.' : (snrNum > 8 ? 'Moderate signal fidelity. Acceptable for general analyticals.' : 'Low-quality signal. Consider adjusting parameters.'));
+            }
+
+            // ── Update Metrics (Amplitude, Noise, SNR, Clarity) ──
+            const ampProfiles = {
+                'EEG': { bpAmp: '10–100 μV', mpAmp: '20–200 μV', bpNoiseLbl: 'Low', mpNoiseLbl: 'Higher', bpNoiseVal: '2 μV', mpNoiseVal: '15 μV', bpClarity: 88, mpClarity: 55 },
+                'ECG': { bpAmp: '0.5–5 mV', mpAmp: '1–10 mV', bpNoiseLbl: 'Low', mpNoiseLbl: 'Higher', bpNoiseVal: '50 μV', mpNoiseVal: '200 μV', bpClarity: 94, mpClarity: 65 },
+                'EMG': { bpAmp: '50 μV–5 mV', mpAmp: '100 μV–30 mV', bpNoiseLbl: 'Moderate', mpNoiseLbl: 'High', bpNoiseVal: '20 μV', mpNoiseVal: '120 μV', bpClarity: 80, mpClarity: 48 },
+                'DBS': { bpAmp: '1–10 V', mpAmp: '2–15 V', bpNoiseLbl: 'Low', mpNoiseLbl: 'Moderate', bpNoiseVal: '0.1 V', mpNoiseVal: '0.8 V', bpClarity: 92, mpClarity: 70 },
+                'Nerve': { bpAmp: '5–80 μV', mpAmp: '10–120 μV', bpNoiseLbl: 'Low', mpNoiseLbl: 'Higher', bpNoiseVal: '3 μV', mpNoiseVal: '25 μV', bpClarity: 85, mpClarity: 52 },
+                'Custom': { bpAmp: '50 μV', mpAmp: '120 μV', bpNoiseLbl: 'Low', mpNoiseLbl: 'Higher', bpNoiseVal: '5 μV', mpNoiseVal: '20 μV', bpClarity: 82, mpClarity: 58 }
+            };
+            const prof = ampProfiles[appType] || ampProfiles['Custom'];
+
+            // Adjust clarity based on actual SNR
+            const bpClarity = aiData ? Math.min(100, Math.round(snrNum / 20 * 100)) : prof.bpClarity;
+            const mpSnrVal = aiData ? +(snrNum / 2.8).toFixed(1) : +(snrNum / 2).toFixed(1);
+            const mpClarity = aiData ? Math.min(100, Math.round(mpSnrVal / 20 * 100)) : prof.mpClarity;
+
+            document.getElementById('bipolar-amp').innerText = prof.bpAmp;
+            document.getElementById('bipolar-noise').innerText = prof.bpNoiseLbl + ' (' + prof.bpNoiseVal + ')';
+            document.getElementById('bipolar-snr').innerText = snrNum.toFixed(1) + ':1';
+            document.getElementById('monopolar-amp').innerText = prof.mpAmp;
+            document.getElementById('monopolar-noise').innerText = prof.mpNoiseLbl + ' (' + prof.mpNoiseVal + ')';
+            document.getElementById('monopolar-snr').innerText = mpSnrVal.toFixed(1) + ':1';
+
+            // Trace labels
+            const bpLabel = document.getElementById('bipolar-trace-label');
+            const mpLabel = document.getElementById('monopolar-trace-label');
+            const traceLabels = {
+                'EEG': { bp: 'Clean Alpha/Beta', mp: 'EMG Artifact' },
+                'ECG': { bp: 'Clean Trace', mp: 'Baseline Wander' },
+                'EMG': { bp: 'Filtered MUAP', mp: 'Cross-Talk Present' },
+                'DBS': { bp: 'Stable Pulse', mp: 'Impedance Drift' },
+                'Nerve': { bp: 'Clean CAP', mp: 'Far-Field Noise' }
+            };
+            const tl = traceLabels[appType] || { bp: 'Clean Trace', mp: 'Artifact Heavy' };
+            if (bpLabel) bpLabel.innerText = tl.bp;
+            if (mpLabel) mpLabel.innerText = tl.mp;
+
+            // Clarity bars
+            document.getElementById('bipolar-clarity-val').innerText = bpClarity + '%';
+            document.getElementById('bipolar-clarity-bar').style.width = bpClarity + '%';
+            document.getElementById('monopolar-clarity-val').innerText = mpClarity + '%';
+            document.getElementById('monopolar-clarity-bar').style.width = mpClarity + '%';
+
+            // ── Update AI Insights text ──
+            const insightTexts = {
+                'EEG': 'EEG analysis reveals distinct alpha (8–13Hz) and beta (13–30Hz) band activity. Bipolar montage effectively rejects common EMG and EOG artifacts, providing clean brain wave data ideal for epileptiform discharge detection and sleep staging.',
+                'ECG': 'Cardiac signal analysis shows well-defined P-QRS-T morphology. Bipolar leads (I, II, III) provide superior common-mode rejection, effectively eliminating 50/60Hz power-line interference for reliable arrhythmia detection.',
+                'EMG': 'EMG analysis detects motor unit action potential (MUAP) patterns during muscle contraction bursts. Bipolar differential recording minimizes cross-talk from adjacent muscle groups, critical for precise neuromuscular analyticals.',
+                'DBS': 'Deep Brain Stimulation pulse analysis shows consistent high-frequency stimulation delivery at 130–185 Hz. Bipolar electrode configuration provides focused current delivery with minimal spread to surrounding neural tissue.',
+                'Nerve': 'Nerve conduction analysis reveals compound action potential (CAP) responses with distinct A-alpha, A-beta, and C-fiber components. Bipolar recording isolates near-field potentials, essential for accurate conduction velocity calculations.',
+                'Custom': 'Signal analysis shows the custom dataset characteristics. Bipolar differential recording provides superior noise rejection compared to monopolar, yielding cleaner waveforms for your specific application.'
+            };
+            const insightEl = document.getElementById('sq-insight-text');
+            const titleEl = document.getElementById('sq-insight-title');
+            if (insightEl) insightEl.innerText = insightTexts[appType] || insightTexts['Custom'];
+            if (titleEl) titleEl.innerText = 'AI ' + (appLabels[appType] || appType) + ' Analysis';
+            
+            // ── Update Morphological Features ──
+            const morphContainer = document.getElementById('sq-morph-container');
+            const morphGrid = document.getElementById('sq-morph-grid');
+            if (morphContainer && morphGrid && aiData && aiData.morphological_features) {
+                morphContainer.style.display = 'block';
+                const m = aiData.morphological_features;
+                const features = [
+                    { label: 'MAV', value: m.mav, icon: '📏' },
+                    { label: 'RMS', value: m.rms, icon: '📶' },
+                    { label: 'Std Dev', value: m.std_dev, icon: '📉' },
+                    { label: 'Energy', value: m.energy, icon: '🧨' },
+                    { label: 'Peak-to-Peak', value: m.peak_to_peak, icon: '↕️' },
+                    { label: 'Zero Crossing', value: m.zcr, icon: '🔀' }
+                ];
+                morphGrid.innerHTML = features.map(f => `
+                    <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); padding:15px; border-radius:14px; text-align:center; transition:0.3s;" onmouseover="this.style.background='rgba(142,36,170,0.1)'; this.style.borderColor='rgba(142,36,170,0.3)';" onmouseout="this.style.background='rgba(255,255,255,0.04)'; this.style.borderColor='rgba(255,255,255,0.08)';">
+                        <div style="font-size:0.65rem; color:#A0AEC0; text-transform:uppercase; margin-bottom:6px; font-weight:700; letter-spacing:0.5px;">${f.icon} ${f.label}</div>
+                        <div style="font-size:1.1rem; font-weight:800; color:#fff;">${f.value}</div>
+                    </div>
+                `).join('');
+            }
+
+            // ═══ APPLICATION-SPECIFIC WAVEFORM GENERATORS ═══
+            function setupCanvas(canvas) {
+                const dpr = window.devicePixelRatio || 1;
+                const rect = canvas.getBoundingClientRect();
+                canvas.width = rect.width * dpr;
+                canvas.height = rect.height * dpr;
+                const ctx = canvas.getContext('2d');
+                ctx.scale(dpr, dpr);
+                return { ctx, w: rect.width, h: rect.height };
+            }
+
+            const bp = setupCanvas(bpCanvas);
+            const mp = setupCanvas(mpCanvas);
+
+            // Waveform generator based on application type
+            function generateWaveformSample(globalX, beatW) {
+                const t = (globalX % beatW) / beatW;
+
+                if (appType === 'EEG') {
+                    const tSec = globalX / 80;
+                    return 0.4 * Math.sin(2 * Math.PI * 10 * tSec)
+                         + 0.15 * Math.sin(2 * Math.PI * 22 * tSec + 1.2)
+                         + 0.25 * Math.sin(2 * Math.PI * 6 * tSec + 0.5)
+                         + 0.1 * Math.sin(2 * Math.PI * 2.5 * tSec + 2.0);
+                }
+                if (appType === 'EMG') {
+                    const tSec = globalX / 120;
+                    const burstPhase = (globalX % 100) / 100;
+                    let envelope = 0;
+                    if (burstPhase >= 0.1 && burstPhase < 0.6) {
+                        envelope = Math.sin(Math.PI * (burstPhase - 0.1) / 0.5);
+                    }
+                    const muap = Math.sin(2 * Math.PI * 85 * tSec) + 0.6 * Math.sin(2 * Math.PI * 130 * tSec + 0.8) + 0.3 * Math.sin(2 * Math.PI * 210 * tSec + 1.5);
+                    return envelope * muap * 0.35 + 0.05 * Math.sin(2 * Math.PI * 45 * tSec);
+                }
+                if (appType === 'DBS') {
+                    const pulseWidth = 5, pulsePeriod = 20;
+                    const pulsePos = globalX % pulsePeriod;
+                    let v = 0;
+                    if (pulsePos < pulseWidth) v = 0.8;
+                    else if (pulsePos < pulseWidth + 3) v = -0.3;
+                    v += 0.08 * Math.sin(2 * Math.PI * 20 * (globalX / 200)) + 0.04 * Math.sin(2 * Math.PI * 4 * (globalX / 200));
+                    return v;
+                }
+                if (appType === 'Nerve') {
+                    const nt = (globalX % 120) / 120;
+                    if (nt >= 0.02 && nt < 0.06) return 0.3 * Math.exp(-Math.pow((nt - 0.04) / 0.01, 2) * 20);
+                    if (nt >= 0.15 && nt < 0.30) { const x=(nt-0.22)/0.05; return 0.7*Math.exp(-x*x*6)*Math.cos(2*Math.PI*2*(nt-0.15)/0.15); }
+                    if (nt >= 0.35 && nt < 0.50) { const x=(nt-0.42)/0.05; return 0.35*Math.exp(-x*x*5)*Math.cos(2*Math.PI*2*(nt-0.35)/0.15); }
+                    if (nt >= 0.65 && nt < 0.85) { const x=(nt-0.75)/0.08; return 0.15*Math.exp(-x*x*4); }
+                    return 0;
+                }
+                // ECG (default) and Custom
+                if (appType === 'Custom') {
+                    const tSec = globalX / 100;
+                    return 0.3*Math.sin(2*Math.PI*5*tSec)+0.2*Math.sin(2*Math.PI*12*tSec+0.7)+0.1*Math.sin(2*Math.PI*30*tSec+1.3);
+                }
+                // ECG: P-QRS-T complex
+                if (t >= 0.0 && t < 0.12) { const x=(t-0.06)/0.06; return 0.12*Math.exp(-x*x*8); }
+                if (t >= 0.12 && t < 0.18) return 0;
+                if (t >= 0.18 && t < 0.22) { const x=(t-0.20)/0.02; return -0.08*Math.exp(-x*x*12); }
+                if (t >= 0.22 && t < 0.30) { const x=(t-0.26)/0.03; return 0.85*Math.exp(-x*x*18); }
+                if (t >= 0.30 && t < 0.36) { const x=(t-0.33)/0.03; return -0.15*Math.exp(-x*x*14); }
+                if (t >= 0.36 && t < 0.48) return 0.01;
+                if (t >= 0.48 && t < 0.65) { const x=(t-0.565)/0.07; return 0.22*Math.exp(-x*x*6); }
+                return 0;
+            }
+
+            let scrollOffset = 0;
+            const speed = 1.8;
+            const beatWidth = (appType === 'EEG' || appType === 'EMG') ? 200 : (appType === 'DBS' ? 160 : (appType === 'Nerve' ? 240 : 180));
+            let animId;
+
+            function drawGrid(ctx, w, h, color) {
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 0.5;
+                for (let y = 0; y < h; y += h/5) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+                for (let x = 0; x < w; x += 40) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
+            }
+
+            function drawSignal(ctx, w, h, color, glowColor, isNoisy) {
+                ctx.clearRect(0, 0, w, h);
+                drawGrid(ctx, w, h, isNoisy ? 'rgba(245,158,11,0.06)' : 'rgba(59,130,246,0.06)');
+
+                // Center line
+                ctx.strokeStyle = isNoisy ? 'rgba(245,158,11,0.1)' : 'rgba(59,130,246,0.1)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath(); ctx.moveTo(0, h/2); ctx.lineTo(w, h/2); ctx.stroke();
+                ctx.setLineDash([]);
+
+                ctx.shadowColor = glowColor;
+                ctx.shadowBlur = isNoisy ? 4 : 8;
+
+                ctx.beginPath();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = isNoisy ? 1.5 : 2;
+                ctx.lineJoin = 'round';
+                ctx.lineCap = 'round';
+
+                const amplitude = h * 0.35;
+                const baseline = h / 2;
+
+                for (let px = 0; px < w; px++) {
+                    const globalX = px + scrollOffset;
+                    let val = generateWaveformSample(globalX, beatWidth);
+
+                    if (isNoisy) {
+                        val += (Math.random() - 0.5) * 0.18;
+                        val += 0.06 * Math.sin(globalX * 0.35);
+                        val += 0.08 * Math.sin(globalX * 0.008);
+                        if (Math.random() < 0.003) val += (Math.random() - 0.5) * 0.5;
+                    }
+
+                    const y = baseline - val * amplitude;
+                    if (px === 0) ctx.moveTo(px, y); else ctx.lineTo(px, y);
+                }
+                ctx.stroke();
+
+                ctx.shadowColor = 'transparent';
+                ctx.shadowBlur = 0;
+
+                const scanX = w - 2;
+                const grad = ctx.createLinearGradient(scanX - 30, 0, scanX, 0);
+                grad.addColorStop(0, 'transparent');
+                grad.addColorStop(1, isNoisy ? 'rgba(245,158,11,0.3)' : 'rgba(59,130,246,0.3)');
+                ctx.fillStyle = grad;
+                ctx.fillRect(scanX - 30, 0, 30, h);
+            }
+
+            function animate() {
+                scrollOffset += speed;
+                drawSignal(bp.ctx, bp.w, bp.h, '#3B82F6', 'rgba(59,130,246,0.6)', false);
+                drawSignal(mp.ctx, mp.w, mp.h, '#F59E0B', 'rgba(245,158,11,0.4)', true);
+                animId = requestAnimationFrame(animate);
+            }
+
+            function handleResize() {
+                const bpNew = setupCanvas(bpCanvas);
+                const mpNew = setupCanvas(mpCanvas);
+                bp.ctx = bpNew.ctx; bp.w = bpNew.w; bp.h = bpNew.h;
+                mp.ctx = mpNew.ctx; mp.w = mpNew.w; mp.h = mpNew.h;
+            }
+
+            window.addEventListener('resize', handleResize);
+            animate();
+
+            window.addEventListener('beforeunload', () => {
+                cancelAnimationFrame(animId);
+            });
+        })();
+        </script>
 
     <?php elseif ($page === 'report'): // ═══ COMPARISON REPORT ═══ ?>
 
@@ -3034,21 +4085,24 @@ $m = $modules[$page] ?? null;
 
                 <!-- Main Content -->
                 <div style="display:flex; flex-direction:column; gap:20px;">
+                    <!-- Clinical Condition Placeholder -->
+                    <div id="report-clinical-condition-container" style="display:none; margin-bottom:25px;"></div>
+
                     <!-- Metrics Card -->
                     <div class="detail-card">
                         <h4 style="color:#fff; margin-bottom:20px;">Signal Comparison Metrics</h4>
                         <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px;">
                             <div style="background:rgba(37,99,235,0.05); padding:15px; border-radius:15px; border:1px solid rgba(37,99,235,0.1);">
                                 <div style="color:#3B82F6; font-weight:700; font-size:0.8rem; margin-bottom:10px;">BIPOLAR (Differential)</div>
-                                <div style="margin-bottom:10px;"><span style="color:#94A3B8; font-size:0.75rem;">SNR:</span> <strong style="color:#fff;">15.2:1</strong></div>
-                                <div style="margin-bottom:10px;"><span style="color:#94A3B8; font-size:0.75rem;">Noise:</span> <strong style="color:#fff;">17.4%</strong></div>
-                                <div><span style="color:#94A3B8; font-size:0.75rem;">Stability:</span> <strong style="color:#fff;">89.9%</strong></div>
+                                <div style="margin-bottom:10px;"><span style="color:#94A3B8; font-size:0.75rem;">SNR:</span> <strong id="report-bp-snr" style="color:#fff;">15.2:1</strong></div>
+                                <div style="margin-bottom:10px;"><span style="color:#94A3B8; font-size:0.75rem;">Noise:</span> <strong id="report-bp-noise" style="color:#fff;">17.4%</strong></div>
+                                <div><span style="color:#94A3B8; font-size:0.75rem;">Stability:</span> <strong id="report-bp-stability" style="color:#fff;">89.9%</strong></div>
                             </div>
                             <div style="background:rgba(20,184,166,0.05); padding:15px; border-radius:15px; border:1px solid rgba(20,184,166,0.1);">
                                 <div style="color:#14B8A6; font-weight:700; font-size:0.8rem; margin-bottom:10px;">MONOPOLAR (Referential)</div>
-                                <div style="margin-bottom:10px;"><span style="color:#94A3B8; font-size:0.75rem;">SNR:</span> <strong style="color:#fff;">8.1:1</strong></div>
-                                <div style="margin-bottom:10px;"><span style="color:#94A3B8; font-size:0.75rem;">Noise:</span> <strong style="color:#fff;">43.8%</strong></div>
-                                <div><span style="color:#94A3B8; font-size:0.75rem;">Stability:</span> <strong style="color:#fff;">69.9%</strong></div>
+                                <div style="margin-bottom:10px;"><span style="color:#94A3B8; font-size:0.75rem;">SNR:</span> <strong id="report-mp-snr" style="color:#fff;">8.1:1</strong></div>
+                                <div style="margin-bottom:10px;"><span style="color:#94A3B8; font-size:0.75rem;">Noise:</span> <strong id="report-mp-noise" style="color:#fff;">43.8%</strong></div>
+                                <div><span style="color:#94A3B8; font-size:0.75rem;">Stability:</span> <strong id="report-mp-stability" style="color:#fff;">69.9%</strong></div>
                             </div>
                         </div>
                     </div>
@@ -3058,19 +4112,19 @@ $m = $modules[$page] ?? null;
                         <div style="margin-bottom:20px;">
                             <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
                                 <span style="color:#fff; font-size:0.85rem;">Signal Fidelity Improvement (Bipolar)</span>
-                                <span style="color:#10B981; font-weight:700;">+86.8%</span>
+                                <span id="report-fidelity-imp" style="color:#10B981; font-weight:700;">+86.8%</span>
                             </div>
                             <div style="height:6px; background:rgba(255,255,255,0.05); border-radius:10px; overflow:hidden;">
-                                <div style="width:86%; height:100%; background:#10B981;"></div>
+                                <div id="report-fidelity-bar" style="width:86%; height:100%; background:#10B981;"></div>
                             </div>
                         </div>
                         <div>
                             <div style="display:flex; justify-content:space-between; margin-bottom:8px;">
                                 <span style="color:#fff; font-size:0.85rem;">Stability Assessment</span>
-                                <span style="color:#3B82F6; font-weight:700;">+28.6%</span>
+                                <span id="report-stability-val" style="color:#3B82F6; font-weight:700;">+28.6%</span>
                             </div>
                             <div style="height:6px; background:rgba(255,255,255,0.05); border-radius:10px; overflow:hidden;">
-                                <div style="width:72%; height:100%; background:#3B82F6;"></div>
+                                <div id="report-stability-bar" style="width:72%; height:100%; background:#3B82F6;"></div>
                             </div>
                         </div>
                     </div>
@@ -3079,7 +4133,7 @@ $m = $modules[$page] ?? null;
                     <div style="background:linear-gradient(135deg, #4F46E5, #7C3AED); padding:25px; border-radius:20px; color:#fff;">
                         <h4 style="margin:0 0 10px 0;">Technique Recommendation</h4>
                         <p id="rec-body" style="font-size:0.95rem; margin:0; line-height:1.6; opacity:0.9;">
-                            Based on the noise profile, <strong>Bipolar Recording</strong> is strongly recommended for this patient setting. It effectively handles the 50/60 Hz power-line interference noted in the dataset.
+                            Based on the noise profile, <strong>Bipolar Recording</strong> is strongly recommended for this subject setting. It effectively handles the 50/60 Hz power-line interference noted in the dataset.
                         </p>
                     </div>
                 </div>
@@ -3112,7 +4166,10 @@ $m = $modules[$page] ?? null;
                     document.getElementById('report-loading').style.display = 'none';
                     document.getElementById('report-result').style.display = 'block';
                     document.getElementById('report-result').style.animation = 'fadeIn 0.8s ease';
-                }, 1500);
+                    
+                    // Populate clinical condition in report
+                    syncSignalQualityData();
+                }, 400);
             }
         </script>
 
@@ -3136,102 +4193,401 @@ $m = $modules[$page] ?? null;
         </style>
 
 
-        <!-- ════════════════════ VISUALIZATION PAGE ════════════════════ -->
         <?php elseif ($page === 'visualize'): ?>
-            <div class="module-header" style="background: linear-gradient(135deg, #0A0E21, #1D2136); border-radius: 20px; padding: 30px; margin-bottom: 30px; border: 1px solid rgba(0, 191, 165, 0.3);">
-                <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div class="module-header" style="background: linear-gradient(135deg, #0f172a, #1e1b4b); border-radius: 20px; padding: 40px; margin-bottom: 30px; border: 1px solid rgba(139, 92, 246, 0.4); box-shadow: 0 10px 30px -10px rgba(139, 92, 246, 0.3); position: relative; overflow: hidden;">
+                <!-- Decorative background elements -->
+                <div style="position: absolute; top: -50px; right: -50px; width: 200px; height: 200px; background: radial-gradient(circle, rgba(139,92,246,0.2) 0%, transparent 70%); border-radius: 50%;"></div>
+                <div style="position: absolute; bottom: -30px; left: 20%; width: 150px; height: 150px; background: radial-gradient(circle, rgba(16,185,129,0.15) 0%, transparent 70%); border-radius: 50%;"></div>
+                
+                <div style="position:relative; z-index:1; display: flex; align-items: center; justify-content: space-between;">
                     <div>
-                        <h2 style="color:#fff; margin:0;">Advanced Spectral Analysis</h2>
-                        <p style="color: #00BFA5; margin: 5px 0 0 0;">Real-time signal fidelity & spatial diagnostics</p>
+                        <div style="display:inline-block; padding: 4px 12px; background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.3); border-radius: 20px; font-size: 11px; color: #C4B5FD; font-weight: bold; letter-spacing: 1px; margin-bottom: 12px; text-transform: uppercase;">Interactive Educational Module</div>
+                        <h2 id="viz-main-title" style="color:#fff; margin:0 0 8px 0; font-size: 28px; font-weight: 800; letter-spacing: -0.5px;">AI Recording Technique Analyzer</h2>
+                        <p style="color: #A78BFA; margin: 0; font-size: 15px; max-width: 600px; line-height: 1.5;">Master the physical dynamics of biomedical signal acquisition. Adjust environmental interference in real-time to visually compare how Bipolar systems reject noise that obscure Monopolar recordings.</p>
                     </div>
-                    <div style="background: rgba(0, 191, 165, 0.1); padding: 10px; border-radius: 12px; border: 1px solid rgba(0, 191, 165, 0.2);">
-                        <span style="font-size: 24px;">📈</span>
+                    <div style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(76, 29, 149, 0.4)); padding: 20px; border-radius: 20px; border: 1px solid rgba(139, 92, 246, 0.3); backdrop-filter: blur(5px);">
+                        <span style="font-size: 42px; display: block; animation: float 3s ease-in-out infinite;">⚖️</span>
                     </div>
                 </div>
             </div>
 
-            <!-- Main Waveform -->
-            <div class="detail-card" style="margin-bottom: 25px; padding: 25px; border-left: 4px solid #00BFA5; background: #0F172A;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                    <div style="font-size: 14px; font-weight: bold; color: #00BFA5; text-transform: uppercase; letter-spacing: 1px;">Live Waveform Analysis</div>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <span style="width: 8px; height: 8px; background: #00BFA5; border-radius: 50%; box-shadow: 0 0 10px #00BFA5; animation: blink 1s infinite;"></span>
-                        <span style="font-size: 11px; color: #888;">ECG PHASE: ACTIVE</span>
-                    </div>
-                </div>
-                <!-- SVG Waveform -->
-                <div style="height: 200px; background: rgba(0,0,0,0.3); border-radius: 12px; position:relative; overflow:hidden;">
-                    <svg width="100%" height="100%" viewBox="0 0 800 200" preserveAspectRatio="none">
-                        <path d="M0,100 L50,100 L60,80 L70,100 L100,100 L110,40 L120,160 L130,100 L160,100 L170,110 L180,100 L230,100 M250,100 L300,100 L310,80 L320,100 L350,100 L360,40 L370,160 L380,100 L410,100 L420,110 L430,100 L480,100 M500,100 L550,100 L560,80 L570,100 L600,100 L610,40 L620,160 L630,100 L660,100 L670,110 L680,100 L730,100" fill="none" stroke="#00BFA5" stroke-width="2">
-                             <animate attributeName="stroke-dasharray" from="0,800" to="800,0" dur="2s" repeatCount="indefinite" />
-                        </path>
-                    </svg>
-                    <div style="position:absolute; top:0; left:50%; width:1px; height:100%; background:rgba(255,255,255,0.1); border-left:1px dashed #00BFA5;"></div>
-                </div>
-            </div>
+            <style>
+                @keyframes float { 0%,100% {transform: translateY(0)} 50% {transform: translateY(-8px)} }
+                .glass-card { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px); border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.08); padding: 25px; box-shadow: 0 4px 20px rgba(0,0,0,0.2); transition: transform 0.3s, border-color 0.3s; }
+                .glass-card:hover { border-color: rgba(255,255,255,0.15); }
+                .custom-slider { -webkit-appearance: none; width: 100%; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.1); outline: none; }
+                .custom-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 20px; height: 20px; border-radius: 50%; background: #F59E0B; cursor: pointer; box-shadow: 0 0 10px rgba(245, 158, 11, 0.6); transition: transform 0.1s; border: 2px solid #fff; }
+                .custom-slider::-webkit-slider-thumb:hover { transform: scale(1.2); }
+                .canvas-layer { position: absolute; top:0; left:0; width:100%; height:100%; }
+                .canvas-container { position:relative; width:100%; height: 160px; border-radius: 12px; overflow:hidden; background: rgba(0,0,0,0.4); }
+                .data-pill { background: rgba(15, 23, 42, 0.85); padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.1); font-size: 11px; font-weight: bold; letter-spacing: 0.5px; backdrop-filter: blur(4px); }
+            </style>
 
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px;">
-                <!-- PSD Graph -->
-                <div class="detail-card" style="padding: 20px;">
-                    <div style="font-size: 13px; font-weight: bold; color: #fff; margin-bottom: 15px;">Power Spectral Density (PSD)</div>
-                    <div style="height: 120px; display:flex; align-items:flex-end; gap:4px; padding-bottom:5px; border-bottom: 1px solid rgba(255,255,255,0.1); border-left: 1px solid rgba(255,255,255,0.1);">
-                        <div style="flex:1; height: 30%; background:#0891B2;"></div>
-                        <div style="flex:1; height: 50%; background:#0891B2;"></div>
-                        <div style="flex:1; height: 80%; background:#0891B2;"></div>
-                        <div style="flex:1; height: 40%; background:#0891B2;"></div>
-                        <div style="flex:1; height: 95%; background:#00BFA5; box-shadow: 0 0 10px rgba(0,191,165,0.5);"></div>
-                        <div style="flex:1; height: 35%; background:#0891B2;"></div>
-                        <div style="flex:1; height: 20%; background:#0891B2;"></div>
+            <div style="display: grid; grid-template-columns: 1fr 340px; gap: 25px; margin-bottom: 30px;">
+                <!-- Main Interactive Simulator -->
+                <div class="glass-card" style="display: flex; flex-direction: column; gap: 20px; border-left: 4px solid #8B5CF6;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div style="display:flex; align-items:center; gap: 10px;">
+                            <span style="font-size: 20px;">🖥️</span>
+                            <h3 style="color: #fff; margin:0; font-size: 16px; font-weight: 600;">Live Acquisition Simulator</h3>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="width: 8px; height: 8px; background: #10B981; border-radius: 50%; box-shadow: 0 0 10px #10B981; animation: blink 1.5s infinite;"></span>
+                            <span style="font-size: 11px; color: #10B981; text-transform:uppercase; font-weight:bold; letter-spacing:0.5px;">Synthesizing AI Data</span>
+                        </div>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 9px; color: #666; margin-top: 5px;">
-                        <span>0Hz</span>
-                        <span>50Hz (Power)</span>
-                        <span>100Hz</span>
+                    
+                    <div style="display:flex; flex-direction:column; gap:20px; flex:1;">
+                        
+                        <!-- Monopolar Window -->
+                        <div style="display:flex; flex-direction:column; gap:8px;">
+                            <div style="display:flex; justify-content:space-between; align-items:flex-end;">
+                                <div style="color:#38BDF8; font-size:13px; font-weight:bold; display:flex; align-items:center; gap:6px;">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h4l2-9 4 18 2-9h4"/></svg>
+                                    Monopolar Reference (Single Active Electrode)
+                                </div>
+                                <div id="mono-snr-label" class="data-pill" style="color:#38BDF8;">Est. SNR: Calculating...</div>
+                            </div>
+                            <div class="canvas-container" style="border: 1px solid rgba(56, 189, 248, 0.25); box-shadow: inset 0 0 20px rgba(56, 189, 248, 0.05);">
+                                <!-- Background Grid Canvas -->
+                                <canvas id="gridCanvasMono" class="canvas-layer"></canvas>
+                                <!-- Signal Canvas -->
+                                <canvas id="monoCanvas" class="canvas-layer"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Divider -->
+                        <div style="display: flex; align-items: center; gap: 15px;">
+                            <div style="height:1px; flex:1; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);"></div>
+                            <div style="font-size: 11px; color: #64748B; font-weight: bold; letter-spacing: 2px;">VS</div>
+                            <div style="height:1px; flex:1; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);"></div>
+                        </div>
+                        
+                        <!-- Bipolar Window -->
+                        <div style="display:flex; flex-direction:column; gap:8px;">
+                            <div style="display:flex; justify-content:space-between; align-items:flex-end;">
+                                <div style="color:#10B981; font-size:13px; font-weight:bold; display:flex; align-items:center; gap:6px;">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m8 8 8 8"/><path d="m8 16 8-8"/><path d="m5 8-3 3"/><path d="m13 21 3-3"/><path d="m9 5 3-3"/></svg>
+                                    Bipolar Differential (Active + Reference)
+                                </div>
+                                <div id="bipo-snr-label" class="data-pill" style="color:#10B981;">Est. SNR: Calculating...</div>
+                            </div>
+                            <div class="canvas-container" style="border: 1px solid rgba(16, 185, 129, 0.25); box-shadow: inset 0 0 20px rgba(16, 185, 129, 0.05);">
+                                <canvas id="gridCanvasBipo" class="canvas-layer"></canvas>
+                                <canvas id="bipoCanvas" class="canvas-layer"></canvas>
+                                <!-- AI Active CMRR badge -->
+                                <div style="position:absolute; top:10px; right:10px; z-index:10; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.4); color:#10B981; font-size:10px; padding:3px 8px; border-radius:12px; display:flex; align-items:center; gap:4px; font-weight:bold;">
+                                    <span style="display:block; width:4px; height:4px; border-radius:50%; background:#10B981; animation: blink 1s infinite;"></span> CMRR ACTIVE 96%
+                                </div>
+                            </div>
+                        </div>
+
                     </div>
                 </div>
 
-                <!-- Spatial Heatmap -->
-                <div class="detail-card" style="padding: 20px;">
-                    <div style="font-size: 13px; font-weight: bold; color: #fff; margin-bottom: 15px;">Noise Distribution Heatmap</div>
-                    <div style="display: flex; gap: 15px; align-items: center;">
-                        <div style="width: 80px; height: 80px; background: radial-gradient(circle, #00BFA5 0%, #0891B2 40%, #0A0E21 100%); border-radius: 50%; border: 2px solid rgba(255,255,255,0.1);"></div>
-                        <div style="flex: 1;">
-                            <div style="font-size: 11px; color: #888; margin-bottom: 5px;">Uniformity</div>
-                            <div style="font-size: 14px; font-weight: bold; color: #fff;">82%</div>
-                            <div style="height:4px; background:rgba(255,255,255,0.1); border-radius:2px; margin-top:8px;">
-                                <div style="width:82%; height:100%; background:#00BFA5; border-radius:2px;"></div>
+                <!-- Analysis Controls & Metrics -->
+                <div style="display:flex; flex-direction:column; gap:25px;">
+                    <!-- Environment Controls -->
+                    <div class="glass-card" style="position: relative;">
+                        <!-- Soft glow back -->
+                        <div style="position:absolute; top:0; left:0; right:0; height:3px; background:linear-gradient(90deg, #F59E0B, transparent); border-radius: 3px 3px 0 0;"></div>
+                        
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom: 20px;">
+                            <div style="background:rgba(245,158,11,0.15); padding:6px; border-radius:8px; display:flex; align-items:center; justify-content:center;">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2"><path d="M4 14a8 8 0 0 1 15.5-2.5"/></svg>
+                            </div>
+                            <h3 style="color: #fff; margin:0; font-size: 15px;">Environment Controls</h3>
+                        </div>
+                        
+                        <div style="margin-bottom:25px;">
+                            <div style="display:flex; justify-content:space-between; margin-bottom: 12px;">
+                                <label style="font-size: 12px; color: #CBD5E1; font-weight:600;">Interference (EMI) Level</label>
+                                <span id="noise-val-disp" style="background:rgba(245,158,11,0.2); padding:2px 6px; border-radius:4px; font-size: 11px; color: #F59E0B; font-weight:bold; display:flex; align-items:center; box-shadow: 0 0 5px rgba(245,158,11,0.3);">50%</span>
+                            </div>
+                            <input type="range" id="noiseSlider" class="custom-slider" min="0" max="100" value="50">
+                            <div style="display:flex; justify-content:space-between; font-size:9px; color:#64748B; margin-top:8px;">
+                                <span style="background:rgba(255,255,255,0.05); padding:2px 4px; border-radius:3px;">Shielded Room</span>
+                                <span style="background:rgba(255,255,255,0.05); padding:2px 4px; border-radius:3px;">Operating Theater</span>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <label style="font-size: 12px; color: #CBD5E1; font-weight:600; margin-bottom: 8px; display:block;">Target Bio-Signal Morphology</label>
+                            <div style="position:relative;">
+                                <select id="signalSelect" class="form-control" style="background:rgba(15,23,42,0.8); color:#fff; border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:10px 15px; appearance:none; width:100%; cursor:pointer; outline:none; font-size:13px;">
+                                    <option value="ECG">❤️ ECG (Electrocardiogram)</option>
+                                    <option value="EEG">🧠 EEG (Electroencephalogram)</option>
+                                    <option value="EMG">💪 EMG (Electromyogram)</option>
+                                    <option value="DBS">⚡ DBS (Deep Brain Stim)</option>
+                                </select>
+                                <div style="position:absolute; right:15px; top:50%; transform:translateY(-50%); pointer-events:none; color:#CBD5E1;">▼</div>
                             </div>
                         </div>
                     </div>
-                </div>
-            </div>
-
-            <!-- AI Insight Card -->
-            <div class="detail-card" style="margin-bottom: 30px; background: linear-gradient(135deg, rgba(0, 96, 156, 0.2) 0%, rgba(10, 14, 33, 0.5) 100%); border: 1px solid rgba(0, 96, 156, 0.3);">
-                <div style="display: flex; gap: 20px; align-items: flex-start;">
-                    <div style="background: rgba(0, 96, 156, 0.1); width: 50px; height: 50px; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px;">🧠</div>
-                    <div>
-                        <h4 style="color: #fff; margin: 0 0 10px 0; font-size: 16px;">AI Dataset Insight</h4>
-                        <p style="color: #BBBBBB; font-size: 13px; line-height: 1.6; margin-bottom: 15px;">
-                            Based on your specific dataset, <strong>BIPOLAR</strong> recording provides a 40% cleaner signal by eliminating common-mode artifacts found in your environment. Optimal for high-precision diagnostic requirements.
-                        </p>
-                        <div style="display: inline-flex; align-items: center; background: rgba(0, 191, 165, 0.1); padding: 5px 12px; border-radius: 20px; font-size: 12px; color: #00BFA5; font-weight: 600;">
-                            Better Technique: BIPOLAR
+                    
+                    <!-- AI Learning Insight -->
+                    <div class="glass-card" style="flex:1; background: linear-gradient(180deg, rgba(88,28,135,0.1) 0%, rgba(15,23,42,0.6) 100%); border: 1px solid rgba(139,92,246,0.25); display:flex; flex-direction:column;">
+                        <div style="display:flex; align-items:center; gap:8px; margin-bottom: 15px;">
+                            <div style="background:rgba(139,92,246,0.2); padding:6px; border-radius:8px; display:flex; align-items:center; justify-content:center;">
+                                <span style="font-size:16px;">🎓</span>
+                            </div>
+                            <h3 style="color: #C4B5FD; margin:0; font-size: 15px;">AI Educational Tutor</h3>
+                        </div>
+                        
+                        <div style="flex:1;">
+                            <p id="ai-tutor-text" style="font-size:13px; color:#E2E8F0; line-height:1.6; margin:0; font-weight:400;">
+                                Initializing AI tutor environment. Please interact with the controls above.
+                            </p>
+                        </div>
+                        
+                        <div style="margin-top: 15px; padding-top:15px; border-top: 1px dashed rgba(139,92,246,0.3); display:flex; flex-direction:column; gap:8px;">
+                            <span style="font-size:10px; color:#94A3B8; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">AI Analytical System Rec:</span>
+                            <div id="ai-recommendation" style="align-self:flex-start; font-size:12px; font-weight:800; color:#10B981; padding:6px 12px; background:rgba(16,185,129,0.15); border:1px solid rgba(16,185,129,0.4); border-radius:6px; letter-spacing:0.5px; box-shadow: 0 0 10px rgba(16,185,129,0.1);">BIPOLAR</div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div style="display: flex; gap: 15px;">
-                <button class="action-btn" style="flex:2; justify-content:center; background: #00609C; padding: 18px;">
-                    Export Spectral Report
-                </button>
-                <a href="dashboard.php?page=signal_quality" class="action-btn" style="flex:1; justify-content:center; background: rgba(255,255,255,0.05); color:#fff; border: 1px solid rgba(255,255,255,0.1);">
-                    Return
+            <!-- Theory explanation box below -->
+            <div class="glass-card" style="background: rgba(15,23,42,0.4); border: 1px solid rgba(139, 92, 246, 0.2);">
+                <div style="display:flex; gap: 20px; align-items:flex-start;">
+                    <div style="font-size:32px; background: linear-gradient(135deg, rgba(139,92,246,0.2), rgba(76,29,149,0.4)); width:70px; height:70px; display:flex; align-items:center; justify-content:center; border-radius:15px; flex-shrink:0; border:1px solid rgba(139,92,246,0.3);">📚</div>
+                    <div>
+                        <h4 style="color:#fff; margin:0 0 10px 0; font-size:16px;">The Engineering Principle: Common-Mode Rejection Ratio (CMRR)</h4>
+                        <p style="color:#94A3B8; font-size:14px; line-height:1.7; margin:0;">
+                            A <strong style="color:#38BDF8;">Monopolar</strong> setup records the absolute voltage difference between the active site and a distant electrical ground. It acts as an antenna, absorbing all environmental noise (EMI, 50/60Hz mains interference) passing through the human body.<br><br>
+                            A <strong style="color:#10B981;">Bipolar</strong> setup uses a differential amplifier to measure the voltage <i>between</i> two closely spaced active electrodes. Because environmental noise hits both electrodes almost identically (Common-Mode), the amplifier subtracts them out to zero, leaving only the localized physiological signal (Differential Mode). This mathematical rejection is why Bipolar remains pristine even at high noise levels.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Clinical Condition Placeholder -->
+            <div id="viz-clinical-condition-container" style="display:none; margin-top:25px; margin-bottom:0;"></div>
+
+            <div style="margin-top:25px; padding: 25px; border-radius: 16px; background: linear-gradient(135deg, rgba(37,99,235,0.05), rgba(37,99,235,0.15)); border: 1px solid rgba(37,99,235,0.3); text-align: center; display: flex; flex-direction: column; align-items: center;">
+                <h4 style="color:#fff; margin:0 0 15px 0; font-size:18px;">Comprehensive Analysis</h4>
+                <a href="dashboard.php?page=report" class="btn btn-primary" style="display:inline-flex; align-items:center; gap:10px; padding:15px 30px; border-radius:12px; background:var(--g-blue); text-decoration:none; font-weight:700; color:#fff; box-shadow:0 10px 25px rgba(37,99,235,0.3);">
+                    <span style="font-size:1.2rem;">📄</span> View Full Comparison Report
                 </a>
             </div>
 
-        <!-- ════════════════════ QUIZ PAGE ════════════════════ -->
+            <script>
+            document.addEventListener("DOMContentLoaded", () => {
+                // UI Elements
+                const noiseSlider = document.getElementById('noiseSlider');
+                const signalSelect = document.getElementById('signalSelect');
+                const tutorText = document.getElementById('ai-tutor-text');
+                const recText = document.getElementById('ai-recommendation');
+                const monoSnr = document.getElementById('mono-snr-label');
+                const bipoSnr = document.getElementById('bipo-snr-label');
+                const noiseValDisp = document.getElementById('noise-val-disp');
+
+                // Canvas Setup
+                const contexts = {};
+                ['mono', 'bipo'].forEach(type => {
+                    const canvas = document.getElementById(type + 'Canvas');
+                    const gridCanvas = document.getElementById('gridCanvas' + (type.charAt(0).toUpperCase() + type.slice(1)));
+                    contexts[type] = {
+                        c: canvas,
+                        ctx: canvas.getContext('2d'),
+                        gc: gridCanvas,
+                        gctx: gridCanvas.getContext('2d')
+                    };
+                });
+
+                function handleResize() {
+                    const dpr = window.devicePixelRatio || 1;
+                    
+                    ['mono', 'bipo'].forEach(type => {
+                        const info = contexts[type];
+                        const rect = info.c.parentElement.getBoundingClientRect();
+                        const w = Math.floor(rect.width);
+                        const h = Math.floor(rect.height);
+                        
+                        info.c.width = w * dpr; info.c.height = h * dpr;
+                        info.gc.width = w * dpr; info.gc.height = h * dpr;
+                        
+                        info.ctx.scale(dpr, dpr);
+                        info.gctx.scale(dpr, dpr);
+                        
+                        info.w = w; info.h = h;
+                        drawGrid(info.gctx, w, h);
+                    });
+                }
+                window.addEventListener('resize', handleResize);
+
+                // Draw background grids once per resize
+                function drawGrid(ctx, w, h) {
+                    ctx.clearRect(0,0,w,h);
+                    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    // Vertical grid
+                    for(let i=0; i<w; i+=40) { ctx.moveTo(i,0); ctx.lineTo(i,h); }
+                    // Horizontal grid
+                    for(let i=0; i<h; i+=40) { ctx.moveTo(0,i); ctx.lineTo(w,i); }
+                    ctx.stroke();
+                    
+                    // Center baseline
+                    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+                    ctx.setLineDash([4,4]);
+                    ctx.beginPath(); ctx.moveTo(0, h/2); ctx.lineTo(w, h/2); ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+
+                // Call resize to setup initial dims
+                setTimeout(handleResize, 100);
+
+                let globalTimeOffset = 0;
+
+                // Physics Generators
+                function getBioSignal(t, type) {
+                    if (type === 'ECG') {
+                        let phase = t % 1.2; // 1.2s avg heart beat
+                        if (phase < 0.1) return 0;
+                        if (phase < 0.18) return 0.15 * Math.sin((phase - 0.1) * Math.PI / 0.08); // P wave
+                        if (phase < 0.25) return 0;
+                        if (phase < 0.28) return -0.15; // Q
+                        if (phase < 0.32) return 0.85;   // R
+                        if (phase < 0.36) return -0.25; // S
+                        if (phase < 0.5) return 0;
+                        if (phase < 0.65) return 0.3 * Math.sin((phase - 0.5) * Math.PI / 0.15); // T wave
+                        return 0;
+                    }
+                    if (type === 'EEG') {
+                        // Alpha, beta, and theta superimposed
+                        return 0.35 * Math.sin(2*Math.PI*10*t) + 0.15 * Math.sin(2*Math.PI*22*t) + 0.2 * Math.sin(2*Math.PI*5*t+1);
+                    }
+                    if (type === 'EMG') {
+                        // Bursts of activation
+                        let burst = (t % 2 < 0.8) ? Math.sin((t%2)*Math.PI/0.8) : 0.02;
+                        return burst * (0.6 * Math.sin(2*Math.PI*85*t) + 0.4 * Math.sin(2*Math.PI*135*t+1.5) + 0.2 * Math.random());
+                    }
+                    if (type === 'DBS') {
+                        let bp = (t % 0.1) / 0.1;
+                        if (bp < 0.1) return 0.6; 
+                        if (bp < 0.15) return -0.2;
+                        return 0.03 * Math.sin(2*Math.PI*60*t);
+                    }
+                    return 0;
+                }
+
+                noiseSlider.addEventListener('input', () => { noiseValDisp.innerText = noiseSlider.value + "%"; });
+
+                function animate() {
+                    const params = {
+                        sigT: signalSelect.value,
+                        nsLvl: parseFloat(noiseSlider.value)
+                    };
+                    
+                    if (!contexts.mono.w) { requestAnimationFrame(animate); return; }
+
+                    const w = contexts.mono.w;
+                    const h = contexts.mono.h;
+
+                    contexts.mono.ctx.clearRect(0,0,w,h);
+                    contexts.bipo.ctx.clearRect(0,0,w,h);
+
+                    contexts.mono.ctx.beginPath();
+                    contexts.bipo.ctx.beginPath();
+                    
+                    // Style config
+                    contexts.mono.ctx.strokeStyle = '#38BDF8';
+                    contexts.mono.ctx.lineWidth = 2.5;
+                    contexts.mono.ctx.lineJoin = 'round';
+                    contexts.mono.ctx.shadowColor = '#0EA5E9';
+                    contexts.mono.ctx.shadowBlur = 4;
+
+                    contexts.bipo.ctx.strokeStyle = '#34D399';
+                    contexts.bipo.ctx.lineWidth = 2.5;
+                    contexts.bipo.ctx.lineJoin = 'round';
+                    contexts.bipo.ctx.shadowColor = '#10B981';
+                    contexts.bipo.ctx.shadowBlur = 4;
+
+                    let pSig = 0, pNsMono = 0, pNsBipo = 0;
+                    const cmrrInefficiency = 0.04; // 96% noise rejection
+
+                    for(let x=0; x<w; x++) {
+                        const t = (x + globalTimeOffset) / 250; 
+                        
+                        const bio = getBioSignal(t, params.sigT);
+                        
+                        // Noise generation
+                        const hz50 = Math.sin(2 * Math.PI * 50 * t);
+                        const wandering = Math.sin(2 * Math.PI * 0.4 * t);
+                        const rf = (Math.random() - 0.5);
+                        
+                        const totalNoiseRaw = (hz50 * 0.6 + wandering * 0.5 + rf * 0.4);
+                        const scaledNoise = totalNoiseRaw * (params.nsLvl / 30);
+
+                        // True signals
+                        const monoVal = bio + scaledNoise;
+                        const bipoVal = bio + (scaledNoise * cmrrInefficiency);
+
+                        // Stats accum
+                        pSig += bio*bio;
+                        pNsMono += scaledNoise*scaledNoise;
+                        pNsBipo += (scaledNoise*cmrrInefficiency)*(scaledNoise*cmrrInefficiency);
+
+                        const ampScale = h * 0.35;
+                        const monoY = (h / 2) - (monoVal * ampScale);
+                        const bipoY = (h / 2) - (bipoVal * ampScale);
+
+                        if(x===0) {
+                            contexts.mono.ctx.moveTo(x, monoY);
+                            contexts.bipo.ctx.moveTo(x, bipoY);
+                        } else {
+                            contexts.mono.ctx.lineTo(x, monoY);
+                            contexts.bipo.ctx.lineTo(x, bipoY);
+                        }
+                    }
+
+                    contexts.mono.ctx.stroke();
+                    contexts.bipo.ctx.stroke();
+
+                    // UI Updates (throttle to save layout thrashing)
+                    if (Math.floor(globalTimeOffset) % 15 === 0) {
+                        let snrM = 10 * Math.log10(pSig / (pNsMono+0.0001));
+                        let snrB = 10 * Math.log10(pSig / (pNsBipo+0.0001));
+                        
+                        if(params.nsLvl === 0) { snrM = 99; snrB = 99; }
+                        
+                        monoSnr.textContent = `Est. SNR: ${snrM > 90 ? '>90' : snrM.toFixed(1)} dB`;
+                        bipoSnr.textContent = `Est. SNR: ${snrB > 90 ? '>90' : snrB.toFixed(1)} dB`;
+
+                        if (params.nsLvl <= 15) {
+                            tutorText.innerHTML = `<strong>Ultra-Low Noise:</strong> In highly shielded environments, the difference between techniques is minimal. <strong style="color:#0EA5E9">Monopolar</strong> yields an excellent SNR (${snrM.toFixed(0)}dB) and accurately captures absolute potentials. Both are suitable.`;
+                            updateBadge('BOTH SUITABLE', '#38BDF8', 'rgba(14,165,233,0.15)', 'rgba(14,165,233,0.3)');
+                        } else if (params.nsLvl < 55) {
+                            tutorText.innerHTML = `<strong>Moderate Interference:</strong> As standard educational noise (60Hz/50Hz mains) enters the system, Monopolar recordings accumulate significant artifacts. The AI recommends <strong style="color:#10B981">Bipolar</strong> to leverage differential subtraction, recovering ~${(snrB - snrM).toFixed(0)}dB of signal clarity.`;
+                            updateBadge('BIPOLAR PREFERRED', '#10B981', 'rgba(16,185,129,0.15)', 'rgba(16,185,129,0.3)');
+                        } else {
+                            tutorText.innerHTML = `<strong>Severe Electromagnetic Interference:</strong> The Monopolar signal is completely swamped by noise and baseline wander, destroying analytical value. <strong style="color:#10B981">Bipolar</strong> differential recording is absolutely mandatory to extract the ${params.sigT} signal safely.`;
+                            updateBadge('BIPOLAR REQUIRED', '#F59E0B', 'rgba(245,158,11,0.15)', 'rgba(245,158,11,0.3)');
+                        }
+                    }
+
+                    globalTimeOffset += 3.5; 
+                    requestAnimationFrame(animate);
+                }
+
+                function updateBadge(text, color, bg, border) {
+                    recText.textContent = text;
+                    recText.style.color = color;
+                    recText.style.background = bg;
+                    recText.style.borderColor = border;
+                    recText.style.boxShadow = `0 0 10px ${bg}`;
+                }
+                
+
+                // Start Animation Loop
+                animate();
+
+                // Sync AI context if available
+                syncSignalQualityData();
+            });
+            </script>
         <?php elseif ($page === 'quiz'): ?>
             <div id="quiz-container">
                 <!-- Quiz Selection View -->
@@ -3544,10 +4900,33 @@ $m = $modules[$page] ?? null;
         $usedPct     = min(100, round(($usedMB / 100) * 100, 1));
         $storageColor= $usedPct > 80 ? '#EF4444' : ($usedPct > 50 ? '#F59E0B' : '#1565C0');
 
-        // All datasets for table
-        $allDatasets = [];
-        $allDs = $_sdb->query("SELECT d.name,d.signal_type,d.technique,d.file_size,d.status,d.upload_date FROM datasets d ORDER BY d.upload_date DESC LIMIT 10");
-        if ($allDs) while ($dr = $allDs->fetch_assoc()) $allDatasets[] = $dr;
+        // Platform datasets for global stats
+        $platformDatasets = [];
+        $pDs = $_sdb->query("SELECT d.name,d.signal_type,d.technique,d.file_size,d.status,d.upload_date FROM datasets d ORDER BY d.upload_date DESC LIMIT 10");
+        if ($pDs) while ($dr = $pDs->fetch_assoc()) $platformDatasets[] = $dr;
+
+        // User-specific datasets for history
+        $userDatasets = [];
+        $udS = $_sdb->prepare("SELECT name, signal_type, technique, file_size, status, upload_date FROM datasets WHERE uploaded_by=? ORDER BY upload_date DESC LIMIT 10");
+        $udS->bind_param('i', $uid); $udS->execute();
+        $ur = $udS->get_result();
+        while($dr = $ur->fetch_assoc()) $userDatasets[] = $dr;
+        $udS->close();
+
+        // Dynamic Learning History
+        $learningHistory = [];
+        $lhS = $_sdb->prepare("SELECT module_name, completion_percentage, last_updated FROM user_progress WHERE user_id=? ORDER BY last_updated DESC LIMIT 5");
+        $lhS->bind_param('i', $uid); $lhS->execute();
+        $lhr = $lhS->get_result();
+        while($lr = $lhr->fetch_assoc()) {
+            $mTitle = $modules[$lr['module_name']]['title'] ?? $lr['module_name'];
+            $learningHistory[] = [
+                'module' => $mTitle,
+                'progress' => $lr['completion_percentage'],
+                'date' => date('M d', strtotime($lr['last_updated']))
+            ];
+        }
+        $lhS->close();
 
         // Privacy policy text (from strings.xml)
         $privacyText = "Last Updated: February 11, 2026\n\nThis Privacy Policy describes how we collect, use, and protect your information when you use the BioElectrode Learning Application.\n\n1. Information We Collect\nWe collect: Name, email address, profile information, learning data (progress, quiz scores), usage data, and device information.\n\n2. How We Use Your Information\nWe use your information to provide educational services, personalize your learning experience, track progress, send notifications, and improve our app.\n\n3. Data Security\nWe implement industry-standard security: HTTPS/SSL encryption, secure password storage, regular security audits, and limited access to personal information.\n\n4. Your Rights\nYou have the right to: access your personal information, correct inaccurate data, request deletion, opt-out of communications, and export your learning data.\n\n5. Data Retention\nWe retain your information as long as your account is active. Account deletion requests are processed within 30 days.\n\n6. Contact Us\nEmail: privacy@bioelectrode.app\nWebsite: www.bioelectrode.app/privacy";
@@ -3684,9 +5063,36 @@ $m = $modules[$page] ?? null;
         .set-modal-close:hover { background:rgba(255,255,255,.15); color:#fff; }
         .set-modal-body { padding:24px 28px; overflow-y:auto; flex:1; font-size:.85rem; color:var(--text2); line-height:1.8; white-space:pre-wrap; }
 
-        /* Pass strength */
-        .pass-bar-bg   { height:4px; background:rgba(255,255,255,.07); border-radius:4px; overflow:hidden; margin-top:7px; }
-        .pass-bar-fill { height:100%; border-radius:4px; transition:.4s; width:0; }
+        /* History Card Specifics */
+        .hist-tabs { display: flex; gap: 4px; background: rgba(0,0,0,0.2); padding: 4px; border-radius: 12px; margin-bottom: 20px; }
+        .hist-tab { 
+            flex: 1; padding: 10px; text-align: center; font-size: 0.75rem; font-weight: 800; 
+            color: var(--text3); cursor: pointer; border-radius: 9px; transition: 0.2s;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .hist-tab.active { background: rgba(255,255,255,0.08); color: #fff; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+        .hist-tab:hover:not(.active) { background: rgba(255,255,255,0.04); color: var(--text2); }
+
+        .progress-item { 
+            display: flex; align-items: center; gap: 15px; padding: 12px; 
+            background: rgba(255,255,255,0.03); border-radius: 14px; margin-bottom: 10px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        .prog-circle { 
+            width: 36px; height: 36px; border-radius: 50%; border: 3px solid rgba(255,255,255,0.1);
+            display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 900;
+            color: #fff; flex-shrink: 0; position: relative;
+        }
+        .prog-circle::after {
+            content: ''; position: absolute; inset: -3px; border-radius: 50%;
+            border: 3px solid transparent; border-top-color: var(--blue-l);
+            transform: rotate(45deg);
+        }
+        .prog-circle.complete { border-color: rgba(52,211,153,0.3); color: #34D399; }
+        .prog-circle.complete::after { border-top-color: #34D399; transform: rotate(0deg); border: 3px solid #34D399; }
+
+        .hist-empty { text-align: center; padding: 40px 20px; color: var(--text3); opacity: 0.7; }
+        .hist-empty i { font-size: 2.5rem; display: block; margin-bottom: 15px; }
     </style>
 
     <!-- App Map Modal -->
@@ -3827,7 +5233,7 @@ By using the BioElectrode AI Learning Application, you agree to the following te
 By accessing or using our app, you agree to be bound by these Terms & Conditions and all applicable laws and regulations.
 
 2. Educational Use Only
-All content provided in this application is for educational purposes only. Clinical decisions should always be made by qualified healthcare professionals.
+All content provided in this application is for educational purposes only. Educational decisions should always be made by qualified healthcare professionals.
 
 3. User Account
 You are responsible for maintaining the confidentiality of your account credentials and for all activities that occur under your account.
@@ -3872,7 +5278,7 @@ Website: www.bioelectrode.app/terms</div>
                     </div>
                     <div class="dl-row">
                         <div class="dl-ico ic-purple">🏥</div>
-                        <div class="dl-txt"><div class="dl-title">Clinical Cases</div><div class="dl-sub">8 cases • 128 MB</div></div>
+                        <div class="dl-txt"><div class="dl-title">Practice Scenarios</div><div class="dl-sub">8 cases • 128 MB</div></div>
                         <span class="dl-btn">⬇️</span>
                     </div>
                     <div class="dl-row">
@@ -3985,6 +5391,31 @@ Website: www.bioelectrode.app/terms</div>
                 </div>
             </div>
         </div>
+        
+        <?php if ($_SESSION['user_role'] === 'Admin'): ?>
+        <!-- ①.A ADMINISTRATOR CONTROLS (Only for Admins) -->
+        <div style="margin-top:20px;">
+            <div class="set-label" style="color:#F472B6;">Administrator Controls</div>
+            <div class="set-list">
+                <a href="admin_dashboard.php" class="set-row" style="background:rgba(219,39,119,0.06); border-color:rgba(219,39,119,0.15);">
+                    <div class="set-ico ic-pink">📊</div>
+                    <div class="set-txt">
+                        <div class="set-title">Admin Dashboard</div>
+                        <div class="set-sub">Manage users, view system logs & global datasets</div>
+                    </div>
+                    <span class="set-chev">🔑</span>
+                </a>
+                <a href="admin_settings.php" class="set-row" style="background:rgba(37,99,235,0.06); border-color:rgba(37,99,235,0.15);">
+                    <div class="set-ico ic-blue">⚙️</div>
+                    <div class="set-txt">
+                        <div class="set-title">Platform Infrastructure</div>
+                        <div class="set-sub">Health metrics, AI tuning & database maintenance</div>
+                    </div>
+                    <span class="set-chev">🛡️</span>
+                </a>
+            </div>
+        </div>
+        <?php endif; ?>
 
         <!-- ② ACCOUNT -->
         <div>
@@ -4095,48 +5526,69 @@ Website: www.bioelectrode.app/terms</div>
             </div>
         </div>
 
-        <!-- ⑥ RESEARCH DATASETS (DB live data) -->
+        <!-- ⑥ HISTORY & PROGRESS -->
         <div>
-            <div class="set-label">Research Datasets</div>
+            <div class="set-label">History &amp; Progress</div>
             <div class="set-list">
-                <div class="set-row" style="flex-direction:column;align-items:stretch;cursor:default;padding:20px;">
-                    <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px;">
-                        <div class="set-ico ic-teal">🗄️</div>
-                        <div class="set-txt">
-                            <div class="set-title">Dataset Management</div>
-                            <div class="set-sub"><?= $totalDs ?> dataset<?= $totalDs!=1?'s':'' ?> available on the platform</div>
+                <div class="set-row" style="flex-direction:column;align-items:stretch;cursor:default;padding:24px;">
+                    <div class="hist-tabs">
+                        <div class="hist-tab active" onclick="switchHistTab('learning', this)">📚 Learning</div>
+                        <div class="hist-tab" onclick="switchHistTab('datasets', this)">💾 Datasets</div>
+                    </div>
+
+                    <!-- Learning Progress Tab -->
+                    <div id="hist-learning">
+                        <?php if(!empty($learningHistory)): ?>
+                            <?php foreach($learningHistory as $item): ?>
+                            <div class="progress-item">
+                                <div class="prog-circle <?= $item['progress']==100?'complete':'' ?>">
+                                    <?= $item['progress'] ?>%
+                                </div>
+                                <div style="flex:1;">
+                                    <div style="color:#fff; font-size:0.88rem; font-weight:700;"><?= $item['module'] ?></div>
+                                    <div style="color:var(--text3); font-size:0.7rem;"><?= $item['date'] ?></div>
+                                </div>
+                                <div style="font-size:1.1rem;"><?= $item['progress']==100?'✅':'⏳' ?></div>
+                            </div>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <div class="hist-empty">
+                                <div style="font-size:2rem;margin-bottom:10px;">📚</div>
+                                <div style="font-size:0.85rem;">You haven't started any modules yet.</div>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+
+                    <!-- Datasets History Tab (Hidden by default) -->
+                    <div id="hist-datasets" style="display:none;">
+                        <?php if (!empty($userDatasets)): ?>
+                        <div style="background:rgba(0,0,0,.25);border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.05);">
+                            <table class="mini-tbl">
+                                <thead>
+                                    <tr><th>Name</th><th>Signal</th><th>Date</th></tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($userDatasets as $ds): ?>
+                                    <tr>
+                                        <td style="color:#fff;font-weight:600;"><?= htmlspecialchars(mb_substr($ds['name'],0,20)) ?><?= mb_strlen($ds['name'])>20?'…':'' ?></td>
+                                        <td><span class="sig-tag" style="background:rgba(21,101,192,.2);color:#60A5FA;"><?= $ds['signal_type'] ?></span></td>
+                                        <td style="font-size:0.7rem;color:var(--text3);"><?= date('d M', strtotime($ds['upload_date'])) ?></td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
                         </div>
-                        <span style="font-size:.68rem;background:rgba(0,137,123,.2);color:#34D399;padding:3px 9px;border-radius:8px;font-weight:800;"><?= $totalDs ?> TOTAL</span>
+                        <?php else: ?>
+                        <div class="hist-empty">
+                            <div style="font-size:2rem;margin-bottom:10px;">📡</div>
+                            <div style="font-size:0.85rem;">No datasets uploaded by you yet.</div>
+                        </div>
+                        <?php endif; ?>
                     </div>
-                    <?php if (!empty($allDatasets)): ?>
-                    <div style="background:rgba(0,0,0,.25);border-radius:12px;overflow:hidden;border:1px solid rgba(255,255,255,.05);">
-                        <table class="mini-tbl">
-                            <thead>
-                                <tr>
-                                    <th>Name</th><th>Signal</th><th>Size</th><th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($allDatasets as $ds):
-                                    $sc = ['ECG'=>'#FC8181','EEG'=>'#C4B5FD','EMG'=>'#6EE7B7'][$ds['signal_type']] ?? '#fff';
-                                    $sb = ['Raw'=>'rgba(255,255,255,.08)','Processed'=>'rgba(5,150,105,.2)','Training'=>'rgba(37,99,235,.2)'][$ds['status']] ?? 'rgba(255,255,255,.05)';
-                                ?>
-                                <tr>
-                                    <td style="color:#fff;font-weight:600;"><?= htmlspecialchars(mb_substr($ds['name'],0,26)) ?><?= mb_strlen($ds['name'])>26?'…':'' ?></td>
-                                    <td><span class="sig-tag" style="color:<?= $sc ?>;background:rgba(0,0,0,.2);"><?= $ds['signal_type'] ?></span></td>
-                                    <td style="font-family:monospace;color:var(--text3);"><?= $ds['file_size'] ?></td>
-                                    <td><span class="sig-tag" style="background:<?= $sb ?>;color:#fff;"><?= $ds['status'] ?></span></td>
-                                </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
+                    
+                    <div style="margin-top:15px; text-align:center;">
+                        <a href="dashboard.php?page=profile" style="font-size:0.75rem; color:var(--blue-l); text-decoration:none; font-weight:700;">View Full Learning Analytics ↗</a>
                     </div>
-                    <?php else: ?>
-                    <div style="text-align:center;padding:28px;color:var(--text3);">
-                        <div style="font-size:2rem;opacity:.3;margin-bottom:8px;">📡</div>
-                        <div style="font-size:.85rem;">No datasets uploaded yet. Go to the AI Analysis module to begin.</div>
-                    </div>
-                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -4274,6 +5726,14 @@ Website: www.bioelectrode.app/terms</div>
     <script type="text/javascript" src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
 
     <script>
+    // Tab switcher for history card
+    function switchHistTab(tab, el) {
+        document.querySelectorAll('.hist-tab').forEach(t => t.classList.remove('active'));
+        el.classList.add('active');
+        document.getElementById('hist-learning').style.display = tab === 'learning' ? 'block' : 'none';
+        document.getElementById('hist-datasets').style.display = tab === 'datasets' ? 'block' : 'none';
+    }
+
     // Password strength bar
     function setPassBar(v) {
         let s = 0;
@@ -4339,16 +5799,16 @@ Website: www.bioelectrode.app/terms</div>
     }
     </script>
 
-    <?php elseif ($page === 'clinical'): // ═══ CLINICAL CASES PAGE ═══ ?>
+    <?php elseif ($page === 'educational'): // ═══ CLINICAL CASES PAGE ═══ ?>
         <div class="module-hero" style="background: linear-gradient(135deg, #0F172A, #1E1B4B); border-color: rgba(255,255,255,0.05); margin-bottom: 30px;">
             <div class="hero-icon-box" style="background: rgba(239, 68, 68, 0.2); color: #FCA5A5;">🏥</div>
             <div class="hero-text">
-                <h2 style="font-weight:900; letter-spacing:-0.5px;">Clinical Cases</h2>
+                <h2 style="font-weight:900; letter-spacing:-0.5px;">Practice Scenarios</h2>
                 <p>Real-world medical scenarios showcasing bioelectrode applications.</p>
             </div>
         </div>
 
-        <div class="clinical-grid">
+        <div class="educational-grid">
             <!-- Cards will be populated dynamically by JS -->
         </div>
 
@@ -4371,8 +5831,8 @@ Website: www.bioelectrode.app/terms</div>
                 </div>
                 <div class="case-modal-body" style="padding: 30px; max-height: 60vh; overflow-y: auto; background: #0F172A;">
                     <div class="case-section">
-                        <h4>Patient Profile</h4>
-                        <p id="casePatient"></p>
+                        <h4>Subject Profile</h4>
+                        <p id="caseStudent"></p>
                     </div>
                     <div class="case-section">
                         <h4>Challenge</h4>
@@ -4383,11 +5843,11 @@ Website: www.bioelectrode.app/terms</div>
                         <p id="caseWhy" style="white-space: pre-wrap;"></p>
                     </div>
                     <div class="case-section">
-                        <h4>Clinical Outcome</h4>
+                        <h4>Educational Outcome</h4>
                         <p id="caseOutcome"></p>
                     </div>
                     <div class="case-section" style="background: rgba(124, 58, 237, 0.1); border: 1px solid rgba(124, 58, 237, 0.2); padding: 20px; border-radius: 12px;">
-                        <h4 style="color: #C4B5FD; margin-top: 0;">Key Clinical Learning</h4>
+                        <h4 style="color: #C4B5FD; margin-top: 0;">Key Educational Learning</h4>
                         <p id="caseLearning" style="margin-bottom: 0; font-style: italic;"></p>
                     </div>
                 </div>
@@ -4395,13 +5855,13 @@ Website: www.bioelectrode.app/terms</div>
         </div>
 
         <script>
-            function populateClinicalCases() {
-                const grid = document.querySelector('.clinical-grid');
+            function populateEducationalCases() {
+                const grid = document.querySelector('.educational-grid');
                 grid.innerHTML = '';
                 
-                clinicalData.forEach((item, index) => {
+                educationalData.forEach((item, index) => {
                     const card = document.createElement('div');
-                    card.className = 'clinical-card';
+                    card.className = 'educational-card';
                     card.onclick = () => showCaseDetail(index);
                     
                     const iconMap = {
@@ -4441,7 +5901,7 @@ Website: www.bioelectrode.app/terms</div>
             }
 
             function showCaseDetail(index) {
-                const item = clinicalData[index];
+                const item = educationalData[index];
                 const modal = document.getElementById('caseModal');
                 
                 const iconMap = {
@@ -4471,7 +5931,7 @@ Website: www.bioelectrode.app/terms</div>
                 badge.style.color = item.type === 'Bipolar' ? '#60A5FA' : '#34D399';
                 badge.style.border = `1px solid ${item.type === 'Bipolar' ? 'rgba(37,99,235,0.4)' : 'rgba(16,185,129,0.4)'}`;
 
-                document.getElementById('casePatient').innerText = item.patientProfile;
+                document.getElementById('caseStudent').innerText = item.studentProfile;
                 document.getElementById('caseChallenge').innerText = item.challenge;
                 document.getElementById('caseWhy').innerText = item.whyRecorded;
                 document.getElementById('caseOutcome').innerText = item.outcome;
@@ -4480,19 +5940,19 @@ Website: www.bioelectrode.app/terms</div>
                 modal.classList.add('open');
             }
 
-            document.addEventListener('DOMContentLoaded', populateClinicalCases);
+            document.addEventListener('DOMContentLoaded', populateEducationalCases);
             // Handle late loads for single page app feel
-            if (document.readyState === 'complete') populateClinicalCases();
+            if (document.readyState === 'complete') populateEducationalCases();
         </script>
 
         <style>
-            .clinical-grid {
+            .educational-grid {
                 display: grid;
                 grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
                 gap: 20px;
                 animation: fadeIn 0.5s ease;
             }
-            .clinical-card {
+            .educational-card {
                 background: var(--card);
                 border: 1px solid var(--border);
                 border-radius: 20px;
@@ -4502,7 +5962,7 @@ Website: www.bioelectrode.app/terms</div>
                 position: relative;
                 overflow: hidden;
             }
-            .clinical-card:hover {
+            .educational-card:hover {
                 transform: translateY(-5px);
                 border-color: rgba(124,58,237,0.4);
                 box-shadow: 0 10px 30px rgba(0,0,0,0.3);
@@ -4579,6 +6039,7 @@ Website: www.bioelectrode.app/terms</div>
             <button class="res-cat-btn" onclick="filterResources('Research Papers')">Research Papers</button>
             <button class="res-cat-btn" onclick="filterResources('Video Tutorials')">Tutorials</button>
             <button class="res-cat-btn" onclick="filterResources('Quick Reference Cards')">Quick References</button>
+            <button class="res-cat-btn" onclick="filterResources('Clinical Case Studies')">Case Studies</button>
         </div>
 
         <div class="resource-grid" id="resourceGrid">
@@ -4655,6 +6116,29 @@ Website: www.bioelectrode.app/terms</div>
                         <div class="res-doc-intro">
                             <p>${item.description}</p>
                         </div>
+                `;
+                
+                // NEW: Render beautiful embedded YouTube player if available
+                if (item.youtubeId) {
+                    bodyHtml += `
+                        <div style="margin: 30px 0 40px 0; border-radius:16px; overflow:hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.4), 0 0 0 1px rgba(0,0,0,0.1); background:#000; position:relative;">
+                            <div style="position:absolute; top:20px; left:20px; background:rgba(0,0,0,0.6); color:#fff; padding:6px 14px; border-radius:20px; font-size:11px; font-weight:bold; letter-spacing:1px; z-index:10; backdrop-filter:blur(4px); border:1px solid rgba(255,255,255,0.2); pointer-events: none;">▶ HD ENGLISH AUDIO TUTORIAL</div>
+                            <iframe width="100%" style="aspect-ratio: 16/9; display:block;" src="https://www.youtube.com/embed/${item.youtubeId}?autoplay=1&rel=0&modestbranding=1" title="Educational Video Player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+                        </div>
+                    `;
+                } else if (item.videoUrl) {
+                    bodyHtml += `
+                        <div style="margin: 30px 0 40px 0; border-radius:16px; overflow:hidden; box-shadow: 0 20px 50px rgba(0,0,0,0.4), 0 0 0 1px rgba(0,0,0,0.1); background:#000; position:relative;">
+                            <div style="position:absolute; top:20px; left:20px; background:rgba(0,0,0,0.6); color:#fff; padding:6px 14px; border-radius:20px; font-size:11px; font-weight:bold; letter-spacing:1px; z-index:10; backdrop-filter:blur(4px); border:1px solid rgba(255,255,255,0.2);">▶ SAMPLE EDU-VIDEO</div>
+                            <video controls autoplay loop playsinline style="width:100%; aspect-ratio:16/9; display:block; object-fit:cover;">
+                                <source src="${item.videoUrl}" type="video/mp4">
+                                Your browser does not support the video tag.
+                            </video>
+                        </div>
+                    `;
+                }
+
+                bodyHtml += `
                         <div class="res-doc-divider"></div>
                 `;
                 
@@ -4815,6 +6299,152 @@ Website: www.bioelectrode.app/terms</div>
 
     </div><!-- /content-area -->
 </div><!-- /main-content -->
+
+
+<script>
+    function syncSignalQualityData() {
+        const saved = localStorage.getItem('last_ai_analysis');
+        if (!saved) return;
+        
+        let state;
+        try {
+            state = JSON.parse(saved);
+        } catch(e) { return; }
+        
+        if (!state.apiData || state.apiData.status !== 'success') return;
+        
+        const snrNum = Number(state.apiData.actual_snr) || 0;
+        const actualSnr = snrNum.toFixed(1) + ":1";
+
+        // Update Visualization Simulator if present
+        const vizNoiseSlider = document.getElementById('noiseSlider');
+        const vizSignalSelect = document.getElementById('signalSelect');
+        const vizNoiseDisp = document.getElementById('noise-val-disp');
+
+        if (vizNoiseSlider && vizSignalSelect) {
+            // Map AI noise level to slider percentage
+            const noiseMap = { 'Low': 15, 'Medium': 45, 'High': 85 };
+            const nsVal = noiseMap[state.noise] || 50;
+            vizNoiseSlider.value = nsVal;
+            if(vizNoiseDisp) vizNoiseDisp.innerText = nsVal + "%";
+            
+            // Map AI app type to signal morphology
+            const app = state.appInfo || '';
+            if(app.includes('ECG')) vizSignalSelect.value = 'ECG';
+            else if(app.includes('EEG')) vizSignalSelect.value = 'EEG';
+            else if(app.includes('EMG')) vizSignalSelect.value = 'EMG';
+            else if(app.includes('Brain')) vizSignalSelect.value = 'EEG';
+            else if(app.includes('Deep Brain')) vizSignalSelect.value = 'DBS';
+        }
+
+        // Fidelity Card/Score
+        const fs = document.getElementById('fidelity-score');
+        const fd = document.getElementById('fidelity-desc');
+        if (fs && fd) {
+            let score = Math.round(Math.min(99, snrNum * 5));
+            if (snrNum > 15) score = Math.round(85 + (snrNum/30)*14);
+            fs.innerText = score;
+            // Note: fidelity-desc is often overwritten by page-specific logic, but we can set it here too
+        }
+
+        // Comparison Metrics (used in report and signal quality)
+        const bpAmp = document.getElementById('bipolar-amp');
+        const mpAmp = document.getElementById('monopolar-amp');
+        const rbpSnr = document.getElementById('report-bp-snr');
+        const rmpSnr = document.getElementById('report-mp-snr');
+
+        if (bpAmp && mpAmp) {
+            const cleans = state.apiData.clean_signal || state.apiData.amplitudes;
+            const peak = Math.max(...cleans.map(Math.abs));
+            const displayAmp = (peak * 100).toFixed(1);
+            bpAmp.innerText = `${displayAmp} μV`;
+            mpAmp.innerText = `${(displayAmp * 2.4).toFixed(1)} μV`;
+        }
+        
+        if (rbpSnr && rmpSnr) {
+            rbpSnr.innerText = snrNum.toFixed(1) + ":1";
+            const mpSnrNum = snrNum / 2.8;
+            rmpSnr.innerText = mpSnrNum.toFixed(1) + ":1";
+            
+            const rbpNoise = document.getElementById('report-bp-noise');
+            const rmpNoise = document.getElementById('report-mp-noise');
+            if(rbpNoise) rbpNoise.innerText = (100/snrNum).toFixed(1) + "%";
+            if(rmpNoise) rmpNoise.innerText = (100/mpSnrNum).toFixed(1) + "%";
+            
+            const rImp = document.getElementById('report-fidelity-imp');
+            const rImpBar = document.getElementById('report-fidelity-bar');
+            if(rImp) {
+                const impVal = Math.round(Math.min(99, snrNum * 4.5));
+                rImp.innerText = "+" + impVal + "%";
+                if(rImpBar) rImpBar.style.width = impVal + "%";
+            }
+        }
+
+        // Clinical Condition Populating (THE MAIN UPDATE)
+        const cond = state.apiData.clinical_condition;
+        if (cond) {
+            const containers = [
+                'sq-clinical-condition-container',
+                'viz-clinical-condition-container',
+                'report-clinical-condition-container'
+            ];
+            
+            const html = `
+                <div style="padding:25px; background:rgba(255,255,255,0.03); border-radius:24px; border:1px solid rgba(255,255,255,0.08); display:flex; align-items:center; gap:20px; border-left: 6px solid ${cond.color}; box-shadow: 0 10px 30px rgba(0,0,0,0.2);">
+                    <div style="width:20px; height:20px; border-radius:50%; background:${cond.color}; box-shadow:0 0 15px ${cond.color};"></div>
+                    <div>
+                        <div style="color:${cond.color}; font-size:0.75rem; text-transform:uppercase; font-weight:800; letter-spacing:1px; margin-bottom:4px;">AI Clinical Assessment</div>
+                        <h3 style="color:#fff; margin:0 0 5px 0; font-size:1.3rem;">${cond.title}</h3>
+                        <p style="color:#94A3B8; margin:0; font-size:1rem; line-height:1.5;">${cond.desc}</p>
+                    </div>
+                </div>
+            `;
+            
+            containers.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.innerHTML = html;
+                    el.style.display = 'block';
+                }
+            });
+        }
+    }
+
+    function drawCompareSignal(canvasId, data, color, isNoisy) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+        
+        ctx.clearRect(0, 0, rect.width, rect.height);
+        ctx.beginPath();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        
+        const step = rect.width / data.length;
+        const min = Math.min(...data);
+        const max = Math.max(...data);
+        const range = max - min || 1;
+        
+        for (let i = 0; i < data.length; i++) {
+            const x = i * step;
+            let val = data[i];
+            if (isNoisy) val += (Math.random() - 0.5) * (range * 0.4);
+            const y = (rect.height / 2) - (val / range) * (rect.height * 0.4);
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+
+    // Run on global load if we have data
+    window.addEventListener('load', () => {
+        setTimeout(syncSignalQualityData, 100);
+    });
+</script>
 
 <script src="js/script.js"></script>
 </body>

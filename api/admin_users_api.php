@@ -100,6 +100,25 @@ switch ($action) {
         echo json_encode(['success' => true, 'total' => $total, 'active' => $active, 'blocked' => $blocked]);
         break;
 
+    /* ── GET USER PROGRESS DETAILED ── */
+    case 'get_user_progress':
+        $id = (int)($_GET['user_id'] ?? 0);
+        $stmt = $conn->prepare("
+            SELECT module_name, completion_percentage, last_updated 
+            FROM user_progress 
+            WHERE user_id = ? 
+            ORDER BY last_updated DESC
+        ");
+        $stmt->bind_param('i', $id);
+        $stmt->execute();
+        $res = $stmt->get_result();
+        $progress = [];
+        while ($r = $res->fetch_assoc()) $progress[] = $r;
+        $stmt->close();
+        $conn->close();
+        echo json_encode(['success' => true, 'progress' => $progress]);
+        break;
+
     default:
         $conn->close();
         echo json_encode(['success' => false, 'message' => 'Unknown action']);

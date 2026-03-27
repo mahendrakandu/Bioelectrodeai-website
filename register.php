@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 session_start();
 if (isset($_SESSION['user_id'])) {
     header('Location: ' . ($_SESSION['user_role'] === 'Admin' ? 'admin_dashboard.php' : 'dashboard.php'));
@@ -46,127 +46,166 @@ switch ($_GET['error'] ?? '') {
             <p>Start your journey with advanced bioelectrode signal analysis and AI-powered learning.</p>
         </div>
         <div class="auth-feature-list">
-            <div class="feature-item fade-up delay-1">
-                <span class="feature-icon">
-                    <!-- Lucide: Graduation Cap -->
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke="#fff"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+            <style>
+                .feature-item-compact { padding: 8px 12px; margin-bottom: 8px; }
+                .feature-text-compact { display: flex; flex-direction: column; line-height: 1.2; }
+                .feature-text-compact strong { font-size: 0.85rem; color: rgba(255,255,255,0.95); }
+                .feature-text-compact small { font-size: 0.7rem; color: rgba(255,255,255,0.7); margin-top: 2px; }
+                .feature-icon-compact { width: 32px; height: 32px; font-size: 1.1rem; }
+                .feature-icon-compact svg { width: 16px; height: 16px; }
+            </style>
+            <div class="feature-item feature-item-compact fade-up delay-1">
+                <span class="feature-icon feature-icon-compact">📡</span>
+                <span class="feature-text feature-text-compact">
+                    <strong>Multi-Signal Support</strong>
+                    <small>ECG, EEG, and EMG signals.</small>
                 </span>
-                <span class="feature-text">Ready to master electrode recording?</span>
             </div>
-            <div class="feature-item fade-up delay-2">
-                <span class="feature-icon">
-                    <!-- Lucide: Microscope -->
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke="#fff"><path d="M6 18h8"/><path d="M3 22h18"/><path d="M14 22a7 7 0 1 0 0-14h-1"/><path d="M9 14h2"/><path d="M9 12a2 2 0 0 1-2-2V6h6v4a2 2 0 0 1-2 2Z"/><path d="M12 6V3a1 1 0 0 0-1-1H9a1 1 0 0 0-1 1v3"/></svg>
+            <div class="feature-item feature-item-compact fade-up delay-2">
+                <span class="feature-icon feature-icon-compact">⚡</span>
+                <span class="feature-text feature-text-compact">
+                    <strong>Dual Recording</strong>
+                    <small>Bipolar & Monopolar configs.</small>
                 </span>
-                <span class="feature-text">Interactive Simulators</span>
             </div>
-            <div class="feature-item fade-up delay-3">
-                <span class="feature-icon">
-                    <!-- Lucide: Bot -->
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke="#fff"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+            <div class="feature-item feature-item-compact fade-up delay-3">
+                <span class="feature-icon feature-icon-compact">📈</span>
+                <span class="feature-text feature-text-compact">
+                    <strong>Real-Time Acquisition</strong>
+                    <small>Live waveform graphs.</small>
                 </span>
-                <span class="feature-text">AI Smart Recommendations</span>
+            </div>
+            <div class="feature-item feature-item-compact fade-up delay-4">
+                <span class="feature-icon feature-icon-compact">🧠</span>
+                <span class="feature-text feature-text-compact">
+                    <strong>AI Signal Analysis</strong>
+                    <small>Filtering & feature extraction.</small>
+                </span>
+            </div>
+            <div class="feature-item feature-item-compact fade-up delay-5">
+                <span class="feature-icon feature-icon-compact">🎯</span>
+                <span class="feature-text feature-text-compact">
+                    <strong>Electrode Guidance</strong>
+                    <small>Visual placement instructions.</small>
+                </span>
+            </div>
+            <div class="feature-item feature-item-compact fade-up delay-6">
+                <span class="feature-icon feature-icon-compact">🔍</span>
+                <span class="feature-text feature-text-compact">
+                    <strong>Quality Assessment</strong>
+                    <small>Noise & artifact detection.</small>
+                </span>
+            </div>
+            <div class="feature-item feature-item-compact fade-up delay-7">
+                <span class="feature-icon feature-icon-compact">📊</span>
+                <span class="feature-text feature-text-compact">
+                    <strong>Comparative Dashboard</strong>
+                    <small>Side-by-side waveform comparisons.</small>
+                </span>
             </div>
         </div>
     </div>
 
     <!-- Right Panel: Registration Form -->
     <div class="auth-right">
-        <div class="auth-form-container fade-up">
-            <h2>Create Account
-                <!-- Lucide: Sparkles -->
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="width:28px;height:28px;stroke:var(--blue-l);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>
-            </h2>
-            <p class="subtitle">Fill in your details to get started</p>
+        <div class="auth-form-wrapper glass-card fade-up">
+            <div class="auth-header">
+                <div class="auth-icon-circle glow-purple">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><polyline points="16 11 18 13 22 9"/></svg>
+                </div>
+                <h2>Create Account</h2>
+                <p>Join our community of biomedical researchers</p>
+            </div>
 
-            <?php if ($error): ?><div class="alert alert-error">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="width:18px;height:18px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                <?= $error ?>
-            </div><?php endif; ?>
+            <?php if ($error): ?>
+                <div class="alert alert-error glass fade-up">
+                    <span class="alert-icon">⚠️</span>
+                    <span><?= $error ?></span>
+                </div>
+            <?php endif; ?>
 
-            <form method="POST" action="api/register_api.php" id="registerForm">
+            <form method="POST" action="api/register_api.php" id="registerForm" class="modern-form">
                 <div class="form-group">
                     <label for="name">Full Name</label>
                     <div class="input-wrapper">
-                        <span class="input-icon">
-                            <!-- Lucide: User -->
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                        </span>
-                        <input type="text" id="name" name="name" class="form-control"
-                               placeholder="Dr. John Doe" required autocomplete="name"
+                        <span class="inner-icon">👤</span>
+                        <input type="text" id="name" name="name" class="form-control" 
+                               placeholder="Dr. Jane Smith" required 
                                value="<?= htmlspecialchars($formData['name'] ?? '') ?>">
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label for="email">Email Address</label>
-                    <div class="input-wrapper">
-                        <span class="input-icon">
-                            <!-- Lucide: Mail -->
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
-                        </span>
-                        <input type="email" id="email" name="email" class="form-control"
-                               placeholder="you@example.com" required autocomplete="email"
-                               value="<?= htmlspecialchars($formData['email'] ?? '') ?>">
+                <div class="form-group" style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+                    <div>
+                        <label for="email">Work Email</label>
+                        <div class="input-wrapper">
+                            <span class="inner-icon">✉️</span>
+                            <input type="email" id="email" name="email" class="form-control" 
+                                   placeholder="name@gmail.com" required 
+                                   value="<?= htmlspecialchars($formData['email'] ?? '') ?>">
+                        </div>
+                    </div>
+                    <div>
+                        <label for="role">Specialization</label>
+                        <div class="input-wrapper">
+                            <select id="role" name="role" class="form-control" style="padding-left:16px;">
+                                <option value="Student"    <?= ($formData['role']??'')!=='Student'    ?'':'selected' ?>>🎓 Student</option>
+                                <option value="Researcher" <?= ($formData['role']??'')!=='Researcher' ?'':'selected' ?>>🔬 Researcher</option>
+                                <option value="Educator"   <?= ($formData['role']??'')!=='Educator'   ?'':'selected' ?>>🏫 Educator</option>
+                            </select>
+                        </div>
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label for="role">Your Role</label>
-                    <div class="input-wrapper">
-                        <span class="input-icon">
-                            <!-- Lucide: Tag -->
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"/><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"/></svg>
-                        </span>
-                        <select id="role" name="role" class="form-control" style="padding-left:44px;">
-                            <option value="Student"    <?= ($formData['role']??'')!=='Student'    ?'':'selected' ?>>🎓 Student</option>
-                            <option value="Researcher" <?= ($formData['role']??'')!=='Researcher' ?'':'selected' ?>>🔬 Researcher</option>
-                            <option value="Educator"   <?= ($formData['role']??'')!=='Educator'   ?'':'selected' ?>>🏫 Educator</option>
-                        </select>
+                <div class="form-group" style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+                    <div>
+                        <label for="password">Password</label>
+                        <div class="input-wrapper">
+                            <input type="password" id="password" name="password" class="form-control" 
+                                   placeholder="Min 6 chars" required style="padding-left:16px;">
+                        </div>
+                    </div>
+                    <div>
+                        <label for="confirm_password">Verify</label>
+                        <div class="input-wrapper">
+                            <input type="password" id="confirm_password" name="confirm_password" class="form-control" 
+                                   placeholder="Repeat" required style="padding-left:16px;">
+                        </div>
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label for="password">Password</label>
-                    <div class="input-wrapper">
-                        <span class="input-icon">
-                            <!-- Lucide: Lock -->
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                        </span>
-                        <input type="password" id="password" name="password" class="form-control"
-                               placeholder="Min. 6 characters" required>
-                        <button type="button" class="toggle-pass" id="togglePass">
-                            <!-- Lucide: Eye -->
-                            <svg id="eyeIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-                        </button>
-                    </div>
-                </div>
-
-                <div class="form-group">
-                    <label for="confirm_password">Confirm Password</label>
-                    <div class="input-wrapper">
-                        <span class="input-icon">
-                            <!-- Lucide: Key -->
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg>
-                        </span>
-                        <input type="password" id="confirm_password" name="confirm_password" class="form-control"
-                               placeholder="Re-enter password" required>
-                    </div>
-                </div>
-
-                <button type="submit" class="btn btn-primary" id="registerBtn" data-loading-text="Creating Account...">
-                    <span>Create Account</span>
-                    <!-- Lucide: ArrowRight -->
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                <button type="submit" class="btn btn-primary glow-purple" id="registerBtn">
+                    <span>Finalize Registration</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
                 </button>
             </form>
 
-            <div class="divider"><span>OR</span></div>
-            <div class="auth-link">
-                Already have an account? <a href="index.php">Sign in</a>
+            <div class="auth-divider">
+                <span>ALREADY HAVE AN ACCOUNT?</span>
             </div>
+
+            <a href="index.php" class="btn btn-secondary glass">
+                Sign In to Workspace
+            </a>
         </div>
     </div>
+</div>
+
+<style>
+.auth-header { text-align: center; margin-bottom: 24px; }
+.auth-icon-circle { width: 64px; height: 64px; background: var(--g-purple); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; color: #fff; }
+.auth-icon-circle.glow-purple { box-shadow: 0 0 24px rgba(139, 92, 246, 0.4); }
+.auth-icon-circle svg { width: 32px; height: 32px; }
+.auth-header h2 { font-size: 1.75rem; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 4px; }
+.auth-header p { color: var(--text2); font-size: 0.9rem; }
+
+.modern-form { display: flex; flex-direction: column; gap: 16px; }
+.inner-icon { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); font-size: 1.1rem; filter: grayscale(1) opacity(0.6); }
+.input-wrapper { position: relative; }
+.input-wrapper .form-control { padding-left: 48px; height: 50px; background: rgba(0,0,0,0.2) !important; border-color: rgba(255,255,255,0.05); border-radius: 12px; }
+.auth-divider { display: flex; align-items: center; gap: 16px; margin: 20px 0; color: var(--text3); font-size: 0.65rem; font-weight: 800; letter-spacing: 1px; }
+.auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+</style>
 
 </div>
 <script src="js/script.js"></script>

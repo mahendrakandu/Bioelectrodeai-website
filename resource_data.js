@@ -17,7 +17,7 @@ const resourceData = [
                         },
                         {
                             heading: "2. The History of Neural Modulation",
-                            body: "The conceptual foundation of bioelectronic medicine dates back to Luigi Galvani's 18th-century experiments demonstrating that electrical stimulation could evoke muscle contractions in frog legs. However, the modern era of clinical bioelectronics truly began with the invention of the cardiac pacemaker in the 1950s and the cochlear implant in the 1970s."
+                            body: "The conceptual foundation of bioelectronic medicine dates back to Luigi Galvani's 18th-century experiments demonstrating that electrical stimulation could evoke muscle contractions in frog legs. However, the modern era of educational bioelectronics truly began with the invention of the cardiac pacemaker in the 1950s and the cochlear implant in the 1970s."
                         },
                         {
                             heading: "3. Foundational Physics of Neural Recording",
@@ -41,18 +41,18 @@ const resourceData = [
             {
                 id: "paper2",
                 title: "Electrode Configuration Strategies",
-                subtitle: "Clinical Settings & Analysis",
+                subtitle: "Educational Settings & Analysis",
                 source: "IEEE Transactions on Biomedical Engineering | 2023 | 11 Pages",
-                description: "Comparative analysis of monopolar vs bipolar electrode configurations in clinical biomedical signal recording.",
+                description: "Comparative analysis of monopolar vs bipolar electrode configurations in educational biomedical signal recording.",
                 content: {
                     sections: [
                         {
                             heading: "1. Introduction to Signal Acquisition",
-                            body: "The integrity of any biomedical diagnostic workflow rests entirely upon the physical interface between the patient and the amplifier. The electrode configuration strategy dictates how electrical potentials are sampled, filtered, and geographically referenced."
+                            body: "The integrity of any biomedical analytical workflow rests entirely upon the physical interface between the student and the amplifier. The electrode configuration strategy dictates how electrical potentials are sampled, filtered, and geographically referenced."
                         },
                         {
                             heading: "2. The Monopolar Paradigm",
-                            body: "Monopolar derivations, often referred to as referential montages in clinical electrophysiology, hinge on the concept of measuring the absolute electrical potential at a highly specific 'active' location against a 'neutral' physiological ground."
+                            body: "Monopolar derivations, often referred to as referential montages in educational electrophysiology, hinge on the concept of measuring the absolute electrical potential at a highly specific 'active' location against a 'neutral' physiological ground."
                         },
                         {
                             heading: "3. The Bipolar Paradigm: Surgical Precision",
@@ -79,7 +79,30 @@ const resourceData = [
                         },
                         {
                             heading: "3. Digital Filtering: Isolating the Signal",
-                            body: "Digital filtering is the computational act of deliberately suppressing unwanted frequency bands while preserving diagnostic biological frequencies. Filters include low-pass, high-pass, band-pass, and notch types."
+                            body: "Digital filtering is the computational act of deliberately suppressing unwanted frequency bands while preserving analytical biological frequencies. Filters include low-pass, high-pass, band-pass, and notch types."
+                        }
+                    ]
+                }
+            },
+            {
+                id: "paper4",
+                title: "Machine Learning in Biosignal Analysis",
+                subtitle: "Pattern Recognition & Neural Networks",
+                source: "Nature Machine Intelligence | 2025 | 16 Pages",
+                description: "Deep learning models for automated classification of ECG arrhythmias and EEG seizure detection using convolutional neural networks.",
+                content: {
+                    sections: [
+                        {
+                            heading: "1. The AI Revolution in Electrophysiology",
+                            body: "The integration of deep learning architectures with traditional electrophysiology represents a tectonic shift in diagnostic capabilities. By leveraging vast datasets, neural networks can now identify subtle morphological patterns in biosignals that often elude human observation."
+                        },
+                        {
+                            heading: "2. Convolutional Neural Networks (CNNs)",
+                            body: "CNNs have proven exceptionally effective at spatial and temporal feature extraction from 1D signal data. In ECG analysis, they can detect atrial fibrillation with higher sensitivity than standard threshold-based algorithms."
+                        },
+                        {
+                            heading: "3. Future of Automated Diagnosis",
+                            body: "The ultimate goal of bioelectrode AI is real-time, on-device inference. This requires the development of lightweight model architectures (such as MobileNet variants) that can run on low-power wearable sensors."
                         }
                     ]
                 }
@@ -94,8 +117,9 @@ const resourceData = [
                 id: "video1",
                 title: "Electrode Setup Guide",
                 subtitle: "Step-by-Step Preparation",
-                source: "Video Tutorial Notes | Dr. Sarah Johnson | 15:24",
-                description: "Companion notes for the Electrode Setup Guide video tutorial covering proper setup procedures for various electrode types.",
+                source: "Video Tutorial | RN Education | 02:45",
+                description: "A rapid, visual overview of proper electrode application. Learn how physical landmarks dictate placement strategy and why achieving <5 kOhm impedance is vital.",
+                youtubeId: "mKZusWukeSo",
                 content: {
                     sections: [
                         {
@@ -103,8 +127,8 @@ const resourceData = [
                             body: "Gather all necessary supplies: electrodes (surface, needle, or depth), conductive gel, skin prep materials (alcohol, abrasive pads), and the recording system. Verify calibration and function."
                         },
                         {
-                            heading: "2. Patient Preparation",
-                            body: "Position the patient comfortably. Mark anatomical landmarks. Clean sites with alcohol to remove oils. Use gentle abrasion to reduce skin impedance below 5 kOhm."
+                            heading: "2. Subject Preparation",
+                            body: "Position the subject comfortably. Mark anatomical landmarks. Clean sites with alcohol to remove oils. Use gentle abrasion to reduce skin impedance below 5 kOhm."
                         }
                     ]
                 }
@@ -113,17 +137,38 @@ const resourceData = [
                 id: "video2",
                 title: "Signal Quality Troubleshooting",
                 subtitle: "Artifact Rejection Techniques",
-                source: "Video Tutorial Notes | Prof. Michael Chen | 22:18",
-                description: "Companion notes for the Signal Quality Troubleshooting video covering systematic approaches to diagnosing and fixing signal quality issues.",
+                source: "Video Tutorial | BPM Biosignals | 03:12",
+                description: "Experience common environmental artifacts in real-time. This guide shows you how to identify and avoid common noise sources like muscle tremors and loose leads.",
+                youtubeId: "VsZLtW5aSfU",
                 content: {
                     sections: [
                         {
                             heading: "1. Systematic Troubleshooting",
-                            body: "Identify the problem: Is it all channels? Intermittent? character character characterize the artifact by frequency and amplitude. Apply targeted solutions and verify."
+                            body: "Identify the problem: Is it all channels? Intermittent? Characterize the artifact by frequency and amplitude. Apply targeted solutions and verify."
                         },
                         {
                             heading: "2. Environmental Noise",
                             body: "Evaluate for 50/60 Hz interference from lighting, nearby MRI equipment, or mobile phones. Ensure proper grounding and use shielded cables."
+                        }
+                    ]
+                }
+            },
+            {
+                id: "video3",
+                title: "Bipolar vs Monopolar: Visual Comparison",
+                subtitle: "Animated Data Systems",
+                source: "Expert Tutorial | EEG Basics",
+                description: "Watch a world-class medical explanation of how bipolar (differential) math actively cancels environmental noise while monopolar acts as an antenna. A fundamental guide to biosignal data acquisition.",
+                youtubeId: "AcW97nMLGEs",
+                content: {
+                    sections: [
+                        {
+                            heading: "1. The Monopolar Antenna Effect",
+                            body: "Understand referential (monopolar) setups where each active electrode is compared to a single reference point. Learn when this configuration is preferred for identifying localized activity."
+                        },
+                        {
+                            heading: "2. The Bipolar Differential Sweep",
+                            body: "Explore bipolar montages where voltage differences between adjacent electrodes cancel out common mode noise, providing superior signal-to-noise ratios in noisy environments."
                         }
                     ]
                 }
@@ -158,7 +203,7 @@ const resourceData = [
                 title: "Signal Interpretation Checklist",
                 subtitle: "Systematic Analysis Protocol",
                 source: "Quick Reference Card | BioElectrode AI",
-                description: "A systematic checklist for interpreting biomedical signals in clinical and research settings.",
+                description: "A systematic checklist for interpreting biomedical signals in educational and research settings.",
                 content: {
                     sections: [
                         {
@@ -187,6 +232,35 @@ const resourceData = [
                         {
                             heading: "2. 60 Hz Interference",
                             body: "Ensure proper grounding and move cables away from power lines. Check if ground electrode is secure."
+                        }
+                    ]
+                }
+            }
+        ]
+    },
+    {
+        category: "Clinical Case Studies",
+        icon: "🏥",
+        items: [
+            {
+                id: "case1",
+                title: "Neuromuscular Grafts Recovery",
+                subtitle: "EMG Signal Evolution",
+                source: "Clinical Case Study | BioElectrode AI | 2026",
+                description: "A longitudinal study tracking the recovery of EMG signals following advanced neuromuscular grafting procedures.",
+                content: {
+                    sections: [
+                        {
+                            heading: "1. Patient Background",
+                            body: "The patient presented with significant axonal loss in the ulnar nerve following trauma. A direct nerve graft was performed using autologous donor tissue."
+                        },
+                        {
+                            heading: "2. Electrophysiological Findings",
+                            body: "Initial EMG recordings showed complete denervation. By month 6, nascent polyphasic motor unit action potentials (MUAPs) were detected, indicating successful reinnervation."
+                        },
+                        {
+                            heading: "3. Analysis & Outcome",
+                            body: "The evolution of signal amplitude and recruitment patterns provided critical bio-feedback for the rehabilitation team, resulting in 85% motor recovery."
                         }
                     ]
                 }

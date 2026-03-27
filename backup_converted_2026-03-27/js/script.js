@@ -89,30 +89,33 @@ function initPasswordToggles() {
 function initFormStates() {
     document.querySelectorAll('form').forEach(form => {
         form.addEventListener('submit', function (e) {
-            // Only validate for register and profile forms
-            if (this.id === 'registerForm' || this.id === 'profileForm') {
-                const nameInput = this.querySelector('input[name="name"]');
+            // Only validate email format for register forms
+            if (this.id === 'registerForm') {
                 const emailInput = this.querySelector('input[type="email"]');
-
-                // 1. Name validation (Alpha only + space)
-                if (nameInput) {
-                    const nameParts = nameInput.value.trim().split(/\s+/);
-                    const nameRegex = /^[A-Za-z\s.'-]+$/;
-                    if (!nameRegex.test(nameInput.value)) {
-                        e.preventDefault();
-                        showFormError(this, 'Full Name must contain <strong>letters only</strong> (spaces and dots allowed).');
-                        resetSubmitBtn(this);
-                        return;
-                    }
-                }
-
-                // 2. Email domain validation
                 if (emailInput) {
                     const email = emailInput.value.trim().toLowerCase();
                     if (email && !email.endsWith('@gmail.com')) {
                         e.preventDefault();
+                        
+                        // Specific handling for BioElectrode AI gmail requirement
                         showFormError(this, 'Email must be in the format: <strong>name@gmail.com</strong>');
-                        resetSubmitBtn(this);
+                        
+                        // Suggest correction if common typo
+                        if (email.includes('@gmail.')) {
+                            const domain = email.split('@')[1];
+                            if (domain !== 'gmail.com') {
+                                const corrected = email.split('@')[0] + '@gmail.com';
+                                const alert = this.parentElement.querySelector('.alert-error');
+                                if (alert) {
+                                    alert.innerHTML += `<br><small style="margin-top:5px; display:block; opacity:0.9;">Did you mean <a href="#" class="suggest-correct" style="color:#fff; text-decoration:underline;" data-corrected="${corrected}">${corrected}</a>?</small>`;
+                                    alert.querySelector('.suggest-correct').addEventListener('click', function(ev) {
+                                        ev.preventDefault();
+                                        emailInput.value = this.getAttribute('data-corrected');
+                                        alert.remove();
+                                    });
+                                }
+                            }
+                        }
                         return;
                     }
                 }
@@ -122,43 +125,32 @@ function initFormStates() {
             if (!btn) return;
             if (btn.classList.contains('btn-primary')) {
                 btn.disabled = true;
-                const span = btn.querySelector('span');
-                if (span) {
-                    btn.setAttribute('data-orig-text', span.textContent);
-                    span.textContent = btn.getAttribute('data-loading-text') || 'Processing System...';
+                const spans = btn.querySelectorAll('span');
+                if (spans.length) {
+                    spans[0].textContent = btn.getAttribute('data-loading-text') || 'Processing...';
+                    if (spans[1]) spans[1].textContent = '⏳';
                 }
             }
         });
     });
 }
 
-function resetSubmitBtn(form) {
-    const btn = form.querySelector('button[type="submit"]');
-    if (!btn) return;
-    btn.disabled = false;
-    const span = btn.querySelector('span');
-    if (span && btn.getAttribute('data-orig-text')) {
-        span.textContent = btn.getAttribute('data-orig-text');
-    }
-}
-
 function showFormError(form, message) {
     // Remove existing
-    const existing = form.parentElement.querySelector('.alert');
+    const existing = form.parentElement.querySelector('.alert-error');
     if (existing) existing.remove();
 
     const alert = document.createElement('div');
-    alert.className = 'alert alert-error glass fade-up';
-    alert.style.marginBottom = '20px';
+    alert.className = 'alert alert-error';
     alert.innerHTML = `
-        <span class="alert-icon">⚠️</span>
-        <span>${message}</span>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="width:18px;height:18px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        ${message}
     `;
     
     const container = form.parentElement;
-    const header = container.querySelector('.auth-header') || container.querySelector('h1') || container.querySelector('h2');
-    if (header) {
-        header.insertAdjacentElement('afterend', alert);
+    const h2 = container.querySelector('h2');
+    if (h2) {
+        h2.insertAdjacentElement('afterend', alert);
     } else {
         container.prepend(alert);
     }

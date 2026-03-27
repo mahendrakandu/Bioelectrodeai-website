@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 session_start();
 if (isset($_SESSION['user_id'])) {
     header('Location: ' . ($_SESSION['user_role'] === 'Admin' ? 'admin_dashboard.php' : 'dashboard.php'));
@@ -14,6 +14,12 @@ switch ($_GET['error'] ?? '') {
 $success = isset($_GET['logout'])
     ? 'You have been logged out successfully.'
     : (isset($_GET['registered']) ? 'Account created! Please log in below.' : '');
+
+// Fetch latest update for the landing/login page
+require_once __DIR__ . '/api/db.php';
+$conn = getDB();
+$publicUpdate = $conn->query("SELECT title, description FROM app_items ORDER BY added_date DESC LIMIT 1")->fetch_assoc();
+$conn->close();
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -34,149 +40,173 @@ $success = isset($_GET['logout'])
 
     <!-- Left Panel: Branding -->
     <div class="auth-left">
+        <div class="glass-orb orb-1"></div>
+        <div class="glass-orb orb-2"></div>
+        <div class="glass-orb orb-3"></div>
+        
         <div class="auth-brand fade-up">
-            <div class="logo-icon">
-                <!-- Lucide: Zap -->
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke="#fff"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            <div class="logo-icon-premium">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20"/><path d="M2 12h20"/><path d="m4.93 4.93 14.14 14.14"/><path d="m4.93 19.07 14.14-14.14"/></svg>
+                <div class="logo-glow"></div>
             </div>
-            <h1>BioElectrode AI</h1>
-            <p>Advanced signal analysis &amp; learning platform for bioelectrode research and education.</p>
+            <h1 class="gradient-text">BioElectrode AI</h1>
+            <p class="brand-tagline">Master the future of bio-signal processing with artificial intelligence.</p>
+            
+            <?php if ($publicUpdate): ?>
+            <!-- Dynamic Update Card on Login -->
+            <div class="update-card-premium glass fade-up delay-1">
+                <div class="update-header">
+                    <span class="badge-pulse">LATEST</span>
+                    <span class="update-date"><?= date('M d', strtotime($publicUpdate['added_date'] ?? 'now')) ?></span>
+                </div>
+                <h3><?= htmlspecialchars($publicUpdate['title']) ?></h3>
+                <p><?= htmlspecialchars($publicUpdate['description']) ?></p>
+            </div>
+            <?php endif; ?>
         </div>
-        <div class="auth-feature-list">
-            <div class="feature-item fade-up delay-1">
-                <span class="feature-icon">
-                    <!-- Lucide: Heart Pulse -->
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke="#fff"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/><path d="M3.22 12H9.5l1.5-3 2 4 1.5-3h5.27"/></svg>
-                </span>
-                <span class="feature-text">ECG Heart Signals</span>
+
+        <div class="features-container">
+            <div class="feature-glass-item fade-up delay-2">
+                <span class="f-icon">📡</span>
+                <div class="f-content">
+                    <strong>Multi-Signal Engine</strong>
+                    <span>Real-time ECG, EEG & EMG.</span>
+                </div>
             </div>
-            <div class="feature-item fade-up delay-2">
-                <span class="feature-icon">
-                    <!-- Lucide: Brain -->
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke="#fff"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"/><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"/><path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"/><path d="M17.599 6.5a3 3 0 0 0 .399-1.375"/><path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"/><path d="M3.477 10.896a4 4 0 0 1 .585-.396"/><path d="M19.938 10.5a4 4 0 0 1 .585.396"/><path d="M6 18a4 4 0 0 1-1.967-.516"/><path d="M19.967 17.484A4 4 0 0 1 18 18"/></svg>
-                </span>
-                <span class="feature-text">EEG Brain Waves</span>
+            <div class="feature-glass-item fade-up delay-3">
+                <span class="f-icon">🧠</span>
+                <div class="f-content">
+                    <strong>AI Feature Extraction</strong>
+                    <span>Heuristic & Deep Learning.</span>
+                </div>
             </div>
-            <div class="feature-item fade-up delay-3">
-                <span class="feature-icon">
-                    <!-- Lucide: Activity -->
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke="#fff"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-                </span>
-                <span class="feature-text">EMG Muscle Activity</span>
-            </div>
-            <div class="feature-item fade-up delay-4">
-                <span class="feature-icon">
-                    <!-- Lucide: BookOpen -->
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" stroke="#fff"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
-                </span>
-                <span class="feature-text">Step-by-Step Theory</span>
+            <div class="feature-glass-item fade-up delay-4">
+                <span class="f-icon">📊</span>
+                <div class="f-content">
+                    <strong>Advanced Dashboards</strong>
+                    <span>Clinical-grade visualization.</span>
+                </div>
             </div>
         </div>
     </div>
+
+<style>
+.logo-icon-premium { position: relative; width: 80px; height: 80px; background: var(--g-multi); border-radius: 22px; display: flex; align-items: center; justify-content: center; margin: 0 auto 24px; color: #fff; box-shadow: 0 20px 40px rgba(0,0,0,0.3); }
+.logo-icon-premium svg { width: 40px; height: 40px; z-index: 2; }
+.logo-glow { position: absolute; inset: -10px; background: var(--g-multi); filter: blur(20px); opacity: 0.4; z-index: 1; border-radius: 50%; }
+
+.gradient-text { font-family: 'Space Grotesk', sans-serif; font-size: 2.5rem; font-weight: 800; background: linear-gradient(to bottom, #fff, #94A3B8); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 12px; }
+.brand-tagline { color: rgba(255,255,255,0.7); font-size: 1rem; max-width: 320px; margin: 0 auto 40px; }
+
+.update-card-premium { padding: 20px; border-radius: var(--r); text-align: left; max-width: 360px; margin: 0 auto; border: 1px solid rgba(255,255,255,0.1); }
+.update-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.badge-pulse { background: var(--pink); color: #fff; font-size: 0.65rem; font-weight: 900; padding: 4px 10px; border-radius: 20px; box-shadow: 0 0 10px var(--pink); }
+.update-date { font-size: 0.75rem; color: var(--text3); }
+.update-card-premium h3 { font-size: 1rem; color: #fff; margin-bottom: 8px; font-weight: 700; }
+.update-card-premium p { font-size: 0.8rem; color: var(--text2); line-height: 1.5; text-align: left; margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+.features-container { margin-top: 60px; display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 320px; }
+.feature-glass-item { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; backdrop-filter: blur(10px); transition: 0.3s; }
+.feature-glass-item:hover { background: rgba(255,255,255,0.1); transform: translateX(10px); }
+.f-icon { font-size: 1.5rem; }
+.f-content { display: flex; flex-direction: column; text-align: left; }
+.f-content strong { font-size: 0.85rem; color: #fff; }
+.f-content span { font-size: 0.75rem; color: rgba(255,255,255,0.6); }
+</style>
 
     <!-- Right Panel: Login Form -->
     <div class="auth-right">
-        <div class="auth-form-container fade-up">
-            <h2>Welcome back
-                <!-- Lucide: Hand Wave (using Sparkles as greeting) -->
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="width:28px;height:28px;stroke:var(--blue-l);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/><path d="M4 17v2"/><path d="M5 18H3"/></svg>
-            </h2>
-            <p class="subtitle">Sign in to your BioElectrode AI account to continue</p>
-
-            <?php if ($error): ?><div class="alert alert-error">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="width:18px;height:18px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-                <?= $error ?>
-            </div><?php endif; ?>
-            <?php if ($success): ?><div class="alert alert-success">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="width:18px;height:18px;flex-shrink:0;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                <?= $success ?>
-            </div><?php endif; ?>
-
-            <form method="POST" action="api/login_api.php" id="loginForm">
-                <div class="form-group">
-                    <label for="email">Email Address</label>
-                    <div class="input-wrapper">
-                        <span class="input-icon">
-                            <!-- Lucide: Mail -->
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
-                        </span>
-                        <input type="email" id="email" name="email" class="form-control"
-                               placeholder="you@example.com" required autocomplete="email"
-                               value="<?= htmlspecialchars($_POST['email'] ?? '') ?>">
-                    </div>
+        <div class="auth-form-wrapper glass-card fade-up">
+            <div class="auth-header">
+                <div class="auth-icon-circle glow-blue">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
                 </div>
-
-                <div class="form-group">
-                    <label for="password">Password</label>
-                    <div class="input-wrapper">
-                        <span class="input-icon">
-                            <!-- Lucide: Lock -->
-                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-                        </span>
-                        <input type="password" id="password" name="password" class="form-control"
-                               placeholder="Enter your password" required autocomplete="current-password">
-                        <button type="button" class="toggle-pass" id="togglePass" title="Show/hide password">
-                            <!-- Lucide: Eye -->
-                            <svg id="eyeIcon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
-                        </button>
-                    </div>
-                </div>
-
-                <button type="submit" class="btn btn-primary" id="loginBtn">
-                    <span>Sign In</span>
-                    <!-- Lucide: ArrowRight -->
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-                </button>
-                <div style="text-align: right; margin-top: 14px;">
-                    <a href="forgot_password.php" class="forgot-link">Forgot Password?</a>
-                </div>
-            </form>
-
-            <style>
-                .forgot-link {
-                    font-size: 0.8rem;
-                    color: rgba(255,255,255,0.4);
-                    text-decoration: none;
-                    transition: all 0.3s;
-                    font-weight: 500;
-                }
-                .forgot-link:hover {
-                    color: var(--blue-l);
-                    text-decoration: underline;
-                }
-                .admin-login-hint {
-                    margin-top: 22px;
-                    background: rgba(220,38,38,0.07);
-                    border: 1px solid rgba(220,38,38,0.22);
-                    border-radius: 12px;
-                    padding: 13px 16px;
-                    display: flex;
-                    align-items: flex-start;
-                    gap: 10px;
-                }
-                .admin-login-hint .hint-icon { font-size: 1.2rem; flex-shrink: 0; margin-top: 1px; }
-                .admin-login-hint .hint-title { font-size: 0.82rem; font-weight: 700; color: #FCA5A5; margin-bottom: 2px; }
-                .admin-login-hint .hint-body  { font-size: 0.77rem; color: rgba(255,255,255,0.45); line-height: 1.5; }
-            </style>
-
-            <div class="divider"><span>OR</span></div>
-
-            <div class="auth-link">
-                Don't have an account? <a href="register.php">Create account</a>
+                <h2>Welcome Back</h2>
+                <p>Enter your credentials to access your workspace</p>
             </div>
 
-            <!-- Admin login info -->
-            <div class="admin-login-hint">
-                <span class="hint-icon">🛡️</span>
-                <div>
-                    <div class="hint-title">Administrator Access</div>
-                    <div class="hint-body">Admins use this same login page with their admin credentials. Upon login, you will be automatically redirected to the <strong style="color:#FCA5A5;">Admin Dashboard</strong>.</div>
+            <?php if ($error): ?>
+                <div class="alert alert-error glass fade-up">
+                    <span class="alert-icon">⚠️</span>
+                    <span><?= $error ?></span>
                 </div>
+            <?php endif; ?>
+
+            <?php if ($success): ?>
+                <div class="alert alert-success glass fade-up">
+                    <span class="alert-icon">✨</span>
+                    <span><?= $success ?></span>
+                </div>
+            <?php endif; ?>
+
+            <form method="POST" action="api/login_api.php" id="loginForm" class="modern-form">
+                <div class="form-group">
+                    <label for="email">Work Email</label>
+                    <div class="input-wrapper">
+                        <span class="inner-icon">✉️</span>
+                        <input type="email" id="email" name="email" class="form-control" 
+                               placeholder="name@gmail.com" required 
+                               value="<?= htmlspecialchars($_GET['email'] ?? $_POST['email'] ?? '') ?>">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="password">Security Password</label>
+                    <div class="input-wrapper">
+                        <span class="inner-icon">🔒</span>
+                        <input type="password" id="password" name="password" class="form-control" 
+                               placeholder="••••••••" required>
+                        <button type="button" class="toggle-pass" id="togglePass">👁️</button>
+                    </div>
+                    <div class="form-footer">
+                        <a href="forgot_password.php" class="text-link">Forgot password?</a>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary glow-blue" id="loginBtn">
+                    <span>Account Login</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                </button>
+            </form>
+
+            <div class="auth-divider">
+                <span>NEW TO THE PLATFORM?</span>
+            </div>
+
+            <a href="register.php" class="btn btn-secondary glass">
+                Create Researcher Account
+            </a>
+
+            <div class="admin-hint glass">
+                <span class="hint-icon">🛡️</span>
+                <p><strong>Admin Access:</strong> Use your privileged credentials. System will auto-detect your role.</p>
             </div>
         </div>
     </div>
-
 </div>
+
+<style>
+.auth-header { text-align: center; margin-bottom: 32px; }
+.auth-icon-circle { width: 64px; height: 64px; background: var(--g-blue); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; color: #fff; }
+.auth-icon-circle svg { width: 32px; height: 32px; }
+.auth-header h2 { font-size: 1.75rem; font-weight: 800; letter-spacing: -0.5px; margin-bottom: 8px; }
+.auth-header p { color: var(--text2); font-size: 0.9rem; }
+
+.modern-form { display: flex; flex-direction: column; gap: 20px; }
+.inner-icon { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); font-size: 1.1rem; filter: grayscale(1) opacity(0.6); }
+.input-wrapper { position: relative; }
+.input-wrapper .form-control { padding-left: 48px; height: 52px; background: rgba(0,0,0,0.2) !important; border-color: rgba(255,255,255,0.05); }
+.form-footer { display: flex; justify-content: flex-end; margin-top: 8px; }
+.text-link { font-size: 0.8rem; color: var(--blue-l); font-weight: 600; opacity: 0.8; transition: 0.3s; }
+.text-link:hover { opacity: 1; text-decoration: underline; }
+
+.auth-divider { display: flex; align-items: center; gap: 16px; margin: 24px 0; color: var(--text3); font-size: 0.65rem; font-weight: 800; letter-spacing: 1px; }
+.auth-divider::before, .auth-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+.admin-hint { margin-top: 32px; padding: 16px; border-radius: var(--r-sm); display: flex; gap: 12px; align-items: flex-start; }
+.admin-hint .hint-icon { font-size: 1.2rem; margin-top: 2px; }
+.admin-hint p { font-size: 0.75rem; color: var(--text2); line-height: 1.5; margin: 0; }
+</style>
 <script src="js/script.js"></script>
 <script>
 // Toggle password visibility with icon swap

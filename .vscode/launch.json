@@ -10,7 +10,7 @@
             "type": "chrome",
             "request": "launch",
             "name": "Launch Chrome against localhost",
-            "url": "http://localhost:8080",
+            "url": "http://14.139.187.229:8081/jan2026/spic741/bielectrodeai/",
             "webRoot": "${workspaceFolder}"
         }
     ]
